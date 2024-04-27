@@ -1,0 +1,25 @@
+{
+  "name": "raven",
+  "displayName": "Raven",
+  "description": "Syntax highlighting for the Raven verification language",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.88.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [{
+      "id": "raven",
+      "aliases": ["Raven", "raven"],
+      "extensions": [".rav"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "raven",
+      "scopeName": "source.raven",
+      "path": "./syntaxes/raven.tmLanguage.json"
+    }]
+  }
+}
