@@ -12,7 +12,7 @@
   "license": "See LICENSE file",
   "repository": {
     "type": "git",
-    "url": "https://github.com/nyu-acses/raven-lang.git"
+    "url": "https://github.com/nyu-acsys/raven-lang.git"
   },
   "contributes": {
     "languages": [{
