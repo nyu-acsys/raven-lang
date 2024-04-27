@@ -9,6 +9,11 @@
   "categories": [
     "Programming Languages"
   ],
+  "license": "See LICENSE file",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nyu-acses/raven-lang.git"
+  },
   "contributes": {
     "languages": [{
       "id": "raven",
