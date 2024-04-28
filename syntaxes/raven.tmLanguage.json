@@ -40,13 +40,13 @@
 		"keywords": {
 			"patterns": [{
 				"name": "keyword.control.raven",
-				"match": "\\b(if|while|else|return|assert|assume|inhale|exhale|fold|unfold|case|data|exists|forall|new)\\b"
+				"match": "\\b(if|while|else|return|havoc|assert|assume|inhale|exhale|fold|unfold|case|data|exists|forall|new|with)\\b"
 			}]
 		},
 		"symbols": {
 			"patterns": [{
 				"name": "storage.type.raven",
-				"match": "\\b(module|interface|type|lemma|func|proc|pred|inv|field|var|val)\\b"
+				"match": "\\b(module|interface|type|lemma|func|proc|pred|inv|field|var|val|import)\\b"
 			}]
 		},
 		"modifiers": {
@@ -58,7 +58,7 @@
 		"specs": {
 			"patterns": [{
 				"name": "keyword.other.raven",
-				"match": "\\b(requires|ensures|returns|atomic)\\b"
+				"match": "\\b(requires|ensures|returns|atomic|invariant)\\b"
 			}]
 		},
 		"constants": {
