@@ -46,7 +46,7 @@
 		"symbols": {
 			"patterns": [{
 				"name": "storage.type.raven",
-				"match": "\\b(axiom|module|interface|type|lemma|func|proc|pred|inv|field|var|val|import)\\b"
+				"match": "\\b(axiom|module|interface|type|lemma|func|proc|pred|inv|field|var|val|import|include)\\b"
 			}]
 		},
 		"modifiers": {
