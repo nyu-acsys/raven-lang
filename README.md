@@ -1,11 +1,12 @@
 # Raven VSCode Extension
 
-This VSCode extension provides language support for the Raven verification language.
+This VSCode extension provides language support for the (Raven language and verifier)[https://github.com/nyu-acsys/raven].
 
 
 ## Features
 
-Presently, the extension only provides syntax highlighting support.
+* Syntax highlighting
+* Diagnostics via integration of the Raven verifier
 
 ## Installation
 

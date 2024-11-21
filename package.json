@@ -4,7 +4,7 @@
   "description": "Syntax highlighting for the Raven verification language",
   "version": "0.0.1",
   "engines": {
-    "vscode": "^1.88.0"
+    "vscode": "^1.95.0"
   },
   "categories": [
     "Programming Languages"
@@ -15,7 +15,31 @@
     "type": "git",
     "url": "https://github.com/nyu-acsys/raven-lang.git"
   },
+  "main": "./client/out/extension",
   "contributes": {
+		"configuration": {
+			"type": "object",
+			"title": "Raven configuration",
+			"properties": {
+				"ravenServer.maxNumberOfProblems": {
+					"scope": "resource",
+					"type": "number",
+					"default": 100,
+					"description": "Controls the maximum number of problems produced by the server."
+				},
+				"ravenServer.trace.server": {
+					"scope": "window",
+					"type": "string",
+					"enum": [
+						"off",
+						"messages",
+						"verbose"
+					],
+					"default": "off",
+					"description": "Traces the communication between VS Code and the language server."
+				}
+			}
+		},
     "languages": [{
       "id": "raven",
       "aliases": ["Raven", "raven"],
@@ -27,5 +51,30 @@
       "scopeName": "source.raven",
       "path": "./syntaxes/raven.tmLanguage.json"
     }]
-  }
+  },
+  "scripts": {
+		"vscode:prepublish": "npm run compile",
+		"compile": "tsc -b",
+		"watch": "tsc -b -w",
+		"lint": "eslint",
+		"postinstall": "cd client && npm install && cd ../server && npm install && cd ..",
+		"test": "sh ./scripts/e2e.sh"
+	},
+	"devDependencies": {
+		"@eslint/js": "^9.13.0",
+		"@stylistic/eslint-plugin": "^2.9.0",
+		"@types/mocha": "^10.0.6",
+		"@types/node": "^20",
+		"@types/tmp": "^0.2.6",
+		"eslint": "^9.13.0",
+		"mocha": "^10.3.0",
+		"typescript": "^5.6.2",
+	        "typescript-eslint": "^8.11.0",
+                "vscode": "^1.95.0"		
+	},
+	"dependencies": {
+		"tmp": "^0.2.3",
+		"ts-pattern": "^5.5.0",
+		"vscode-uri": "^3.0.8"
+	}
 }

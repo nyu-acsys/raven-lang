@@ -40,7 +40,7 @@
 		"keywords": {
 			"patterns": [{
 				"name": "keyword.control.raven",
-				"match": "\\b(if|while|else|return|havoc|assert|assume|inhale|exhale|fold|unfold|case|data|exists|forall|new|with)\\b"
+				"match": "\\b(if|while|else|return|havoc|assert|assume|inhale|exhale|fold|unfold|case|data|exists|forall|new|with|spawn)\\b"
 			}]
 		},
 		"symbols": {
