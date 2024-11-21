@@ -188,7 +188,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 
 	if (stdout == "") { return diagnostics; }
 
-	const errors: {kind: string, file: string, message: string, start_line: number, start_col: number, end_line: number, end_col: number}[] = JSON.parse(stdout);
+	const errors: {kind: string, file: string, message: string[], start_line: number, start_col: number, end_line: number, end_col: number}[] = JSON.parse(stdout);
 	
 	for(const err of errors) {
 		console.log(err);
@@ -203,6 +203,9 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 			.with({ kind: 'RelatedLoc' }, () => 'Related Location')
 			.otherwise(() => "Error");
 
+		console.log(err.message);
+		const msg = err.message.join("\n");
+		
 		if (err.kind == "RelatedLoc") {
 			console.log("adding related loc");
 			if (hasDiagnosticRelatedInformationCapability) {
@@ -216,7 +219,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 							  end: { line: err.end_line - 1, character: err.end_col }
 						  },
 						},
-						message: `${err.message}`,
+						message: `${msg}`,
 						source: 'raven'
 					};
 				  if (!diagnostic.relatedInformation) {
@@ -234,7 +237,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 					start: { line: err.start_line - 1, character: err.start_col}, //textDocument.positionAt(err.range_start),
 					end: { line: err.end_line - 1, character: err.end_col }
 				},
-				message: `[${kind_string}] ${err.message}`,
+				message: `[${kind_string}] ${msg}`,
 				source: 'raven'
 			};
 			diagnostics.push(diagnostic);

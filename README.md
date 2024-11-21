@@ -13,6 +13,7 @@ This VSCode extension provides language support for the [Raven language and veri
 Run
 
 ```bash
+$ npm install
 $ npx @vscode/vsce package
-$ code --install-extension raven-0.0.1.vsix
+$ code --install-extension raven-1.0.0.vsix
 ```
