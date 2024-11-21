@@ -71,7 +71,7 @@
 		"mocha": "^10.3.0",
 		"typescript": "^5.6.2",
 	        "typescript-eslint": "^8.11.0",
-                "vscode": "^1.95.0"		
+                "vscode": "^1.1.37"		
 	},
 	"dependencies": {
 		"tmp": "^0.2.3",

@@ -5,3 +5,4 @@ node_modules
 tsconfig.lsif.json
 *.lsif
 *.tsbuildinfo
+package-lock.json
