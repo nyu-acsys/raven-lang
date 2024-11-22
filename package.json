@@ -5,7 +5,7 @@
   "icon": "images/logo.png",
 	"version": "1.0.0",
   "engines": {
-    "vscode": "^1.95.0"
+    "vscode": "^1.95.0" 
   },
   "categories": [
     "Programming Languages"

@@ -179,7 +179,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 
 	const execFile = promisify(execCb);
 
-	const {stdout} = await execFile("raven", ["--lsp-mode", "-q", `${tmpfile.name}`], { cwd: path});
+	const {stdout} = await execFile("raven", ["--lsp-mode", "-q", "--base-dir", path, tmpfile.name], { cwd: path});
 	
 	tmpfile.removeCallback();
 	console.log(`Raven response: ${stdout}`);
