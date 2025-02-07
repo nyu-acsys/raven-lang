@@ -15,6 +15,8 @@ import {
 	DocumentDiagnosticReportKind,
 	type DocumentDiagnosticReport,
 	//TextDocumentIdentifier
+	WorkDoneProgressBegin,
+	WorkDoneProgressEnd
 } from 'vscode-languageserver/node';
 
 import {
@@ -162,34 +164,53 @@ connection.languages.diagnostics.on(async (params) => {
 
 // The content of a text document has changed. This event is emitted
 // when the text document first opened or when its content has changed.
-documents.onDidChangeContent(change => {
+/*documents.onDidChangeContent(change => {
 	validateTextDocument(change.document);
-});
+});*/
 
 async function validateTextDocument(textDocument: TextDocument): Promise<Diagnostic[]> {
-	// In this simple example we get the settings for every validate run.
-	//const settings = await getDocumentSettings(textDocument.uri);
+	// Register progress notification
+  const progress = await connection.window.createWorkDoneProgress();
+	progress.begin('Raven', 0, 'verifying', true);
+
+	// Create temporary file from document
 	const file = URI.parse(textDocument.uri).path;
 	const path = file.slice(0, file.lastIndexOf('/'));
-	console.log(`raven ${path}`);
-	
+	console.log(`raven ${path}`);	
 	const tmpfile = tmp.fileSync({postfix: ".rav"});
-  
 	fs.appendFileSync(tmpfile.fd, textDocument.getText());
 
+	// Call raven and delete tmp
 	const execFile = promisify(execCb);
-
-	const {stdout} = await execFile("raven", ["--lsp-mode", "-q", "--base-dir", path, tmpfile.name], { cwd: path});
+	console.log(process.env.PATH);
+	const {stdout} = await execFile("raven", ["--lsp-mode", "-q", "--base-dir", path, tmpfile.name], { cwd: path, env: process.env });
 	
 	tmpfile.removeCallback();
 	console.log(`Raven response: ${stdout}`);
 	
+	// Signal to client that we are done
+	progress.done();
+
+	// Start raven output analysis
 	const diagnostics: Diagnostic[] = [];
 
+	// No output = no problems foudn
 	if (stdout == "") { return diagnostics; }
 
-	const errors: {kind: string, file: string, message: string[], start_line: number, start_col: number, end_line: number, end_col: number}[] = JSON.parse(stdout);
+	// Parse non-empty output
+	const parse = function(stdout: any) {
+		try {
+			return JSON.parse(stdout);
+		} catch (e) {
+			// Report internal error if output is invalid
+			return [{kind: "Internal", file: tmpfile.name, message: "Failed to parse output of Raven", start_line: 0, start_col: 0, end_line: 0, end_col: 0}];
+		}
+	}
 	
+	const errors: {kind: string, file: string, message: string[], start_line: number, start_col: number, end_line: number, end_col: number}[] = 
+	  parse(stdout);
+
+	// Convert errors into diagnostic reports
 	for(const err of errors) {
 		console.log(err);
 		const kind_string = match(err)

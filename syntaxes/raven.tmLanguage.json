@@ -70,7 +70,7 @@
 		"inbuilt": {
 			"patterns": [{
 				"name": "support.function.raven",
-				"match": "\\b(cas|own|bindAU|openAU|commitAU|abortAU)\\b"
+				"match": "\\b(cas|faa|xchg|own|bindAU|openAU|commitAU|abortAU)\\b"
 			}]
 		},
 		"operators": {
