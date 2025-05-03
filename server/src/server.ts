@@ -203,7 +203,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 			return JSON.parse(stdout);
 		} catch (e) {
 			// Report internal error if output is invalid
-			return [{kind: "Internal", file: tmpfile.name, message: "Failed to parse output of Raven", start_line: 0, start_col: 0, end_line: 0, end_col: 0}];
+			return [{kind: "Internal", file: tmpfile.name, message: ["Failed to parse output of Raven"], start_line: 1, start_col: 0, end_line: 1, end_col: 0}];
 		}
 	}
 	
