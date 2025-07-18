@@ -16,7 +16,8 @@ import {
 	type DocumentDiagnosticReport,
 	//TextDocumentIdentifier
 	WorkDoneProgressBegin,
-	WorkDoneProgressEnd
+	WorkDoneProgressEnd,
+	ProgressType
 } from 'vscode-languageserver/node';
 
 import {
@@ -145,57 +146,66 @@ documents.onDidClose(e => {
 	documentSettings.delete(e.document.uri);
 });
 
+// Define progress types for workDoneProgress
+const WorkDoneProgressType = new ProgressType<any>();
+
 connection.languages.diagnostics.on(async (params) => {
-	const document = documents.get(params.textDocument.uri);
-	if (document !== undefined) {
-		return {
-			kind: DocumentDiagnosticReportKind.Full,
-			items: await validateTextDocument(document)
-		} satisfies DocumentDiagnosticReport;
-	} else {
-		// We don't know the document. We can either try to read it from disk
-		// or we don't report problems for it.
-		return {
-			kind: DocumentDiagnosticReportKind.Full,
-			items: []
-		} satisfies DocumentDiagnosticReport;
+	// Use workDoneToken for progress reporting if present
+	if (params.workDoneToken) {
+		connection.sendProgress(WorkDoneProgressType, params.workDoneToken, {
+			kind: 'begin',
+			title: 'Raven',
+			cancellable: false,
+			message: 'verifying',
+			percentage: 0
+		});
 	}
+
+	const document = documents.get(params.textDocument.uri);
+	let diagnostics: Diagnostic[] = [];
+	if (document !== undefined) {
+		diagnostics = await validateTextDocument(document);
+	}
+
+	if (params.workDoneToken) {
+		connection.sendProgress(WorkDoneProgressType, params.workDoneToken, {
+			kind: 'end',
+			message: 'done'
+		});
+	}
+
+	return {
+		kind: DocumentDiagnosticReportKind.Full,
+		items: diagnostics
+	} satisfies DocumentDiagnosticReport;
 });
 
-// The content of a text document has changed. This event is emitted
-// when the text document first opened or when its content has changed.
-/*documents.onDidChangeContent(change => {
-	validateTextDocument(change.document);
-});*/
-
+// Remove progress logic from validateTextDocument
 async function validateTextDocument(textDocument: TextDocument): Promise<Diagnostic[]> {
-	// Register progress notification
-  const progress = await connection.window.createWorkDoneProgress();
-	progress.begin('Raven', 0, 'verifying', true);
-
 	// Create temporary file from document
 	const file = URI.parse(textDocument.uri).path;
 	const path = file.slice(0, file.lastIndexOf('/'));
-	console.log(`raven ${path}`);	
+	console.log(`raven ${path}`); 
 	const tmpfile = tmp.fileSync({postfix: ".rav"});
 	fs.appendFileSync(tmpfile.fd, textDocument.getText());
 
 	// Call raven and delete tmp
 	const execFile = promisify(execCb);
-	console.log(process.env.PATH);
+	process.env.PATH = '/Users/ekansh/.opam/raven/bin' + ':' + process.env.PATH;
+	// console.log(process.env.PATH);
 	const {stdout} = await execFile("raven", ["--lsp-mode", "-q", "--base-dir", path, tmpfile.name], { cwd: path, env: process.env });
 	
 	tmpfile.removeCallback();
 	console.log(`Raven response: ${stdout}`);
 	
-	// Signal to client that we are done
-	progress.done();
-
 	// Start raven output analysis
 	const diagnostics: Diagnostic[] = [];
 
-	// No output = no problems foudn
-	if (stdout == "") { return diagnostics; }
+	// No output = no problems found
+	if (stdout == "") {
+		console.log("No errors found");
+		return diagnostics;
+	}
 
 	// Parse non-empty output
 	const parse = function(stdout: any) {
