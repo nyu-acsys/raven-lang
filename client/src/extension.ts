@@ -16,7 +16,39 @@ import {
 } from 'vscode-languageclient/node';
 
 let client: LanguageClient;
-let verificationStatusBarItem: vscode.StatusBarItem;
+let verificationSucceededStatusBarItem: vscode.StatusBarItem;
+let verificationFailedStatusBarItem: vscode.StatusBarItem;
+let verificationVerifyingStatusBarItem: vscode.StatusBarItem;
+
+function getActiveRavenEditor(): vscode.TextEditor | undefined {
+	const editor = vscode.window.activeTextEditor;
+	return editor && editor.document.languageId === 'raven' ? editor : undefined;
+}
+
+function updateStatusBar(editor: vscode.TextEditor | undefined) {
+	// Always hide everything first
+	verificationSucceededStatusBarItem.hide();
+	verificationFailedStatusBarItem.hide();
+	verificationVerifyingStatusBarItem.hide();
+
+	if (!editor) {
+		return;
+	}
+
+	// Check diagnostics for errors
+	const diagnostics = vscode.languages.getDiagnostics(editor.document.uri);
+	const hasErrors = diagnostics.some(d => d.severity === vscode.DiagnosticSeverity.Error);
+
+	if (hasErrors) {
+		verificationFailedStatusBarItem.show();
+	} else {
+		// If no errors, we assume success unless we are verifying (which is handled by progress)
+		// However, we need to know if we are currently verifying to decide whether to show "Success" or "Verifying".
+		// The original logic just showed "Success" if no errors, and "Verifying" was triggered by progress.
+		// We will show "Success" here. Progress events will override this.
+		verificationSucceededStatusBarItem.show();
+	}
+}
 
 export function activate(context: ExtensionContext) {
 	// The server is implemented in node
@@ -53,69 +85,90 @@ export function activate(context: ExtensionContext) {
 		clientOptions
 	);
 
-	// Create the status bar item
-	verificationStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
-	verificationStatusBarItem.text = '$(check) Verification Successful';
-	verificationStatusBarItem.tooltip = 'Raven: Verification was successful';
-	verificationStatusBarItem.color = new vscode.ThemeColor('charts.green');
-	verificationStatusBarItem.hide();
-	context.subscriptions.push(verificationStatusBarItem);
+	// Create the status bar items
+	verificationSucceededStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
+	verificationSucceededStatusBarItem.text = '$(check) Verification Successful';
+	verificationSucceededStatusBarItem.tooltip = 'Raven: Verification was successful';
+	verificationSucceededStatusBarItem.color = new vscode.ThemeColor('charts.green');
+	context.subscriptions.push(verificationSucceededStatusBarItem);
 
-	// Create the failed status bar item
-	const verificationFailedStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
+	verificationFailedStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
 	verificationFailedStatusBarItem.text = '$(error) Verification Failed';
 	verificationFailedStatusBarItem.tooltip = 'Raven: Verification failed';
 	verificationFailedStatusBarItem.color = new vscode.ThemeColor('charts.red');
-	verificationFailedStatusBarItem.hide();
 	context.subscriptions.push(verificationFailedStatusBarItem);
 
-	// Create the verifying status bar item
-	const verificationVerifyingStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
+	verificationVerifyingStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
 	verificationVerifyingStatusBarItem.text = '$(sync~spin) Raven: Verifying';
 	verificationVerifyingStatusBarItem.tooltip = 'Raven: Verifying...';
-	verificationVerifyingStatusBarItem.color = undefined; // Use default color
-	console.log("Raven: veryingHide: 0");
-	verificationVerifyingStatusBarItem.hide();
+	verificationVerifyingStatusBarItem.color = undefined;
 	context.subscriptions.push(verificationVerifyingStatusBarItem);
 
 	// Listen for progress notifications from the server
-	const WorkDoneProgressType = new (require('vscode-languageclient').ProgressType)();
+	const WorkDoneProgressType = new ProgressType<any>();
 	client.onProgress(WorkDoneProgressType, undefined, (progress: any) => {
+		const editor = getActiveRavenEditor();
+		if (!editor) return; // if we aren't looking at a raven file, don't show progress? 
+		// Or maybe we SHOULD show progress but only if it's relevant?
+		// For simplicity/cleanup, let's only show if active editor is Raven.
+
 		if (progress && progress.kind === 'begin') {
 			verificationVerifyingStatusBarItem.show();
-			verificationStatusBarItem.hide();
+			verificationSucceededStatusBarItem.hide();
 			verificationFailedStatusBarItem.hide();
 		} else if (progress && progress.kind === 'end') {
 			verificationVerifyingStatusBarItem.hide();
-			verificationStatusBarItem.hide();
-			verificationFailedStatusBarItem.hide();
+			// Re-assess status
+			updateStatusBar(editor);
 		}
 	});
 
-	// On any document change, show verifying and hide both success/fail
+	// On active editor change
+	vscode.window.onDidChangeActiveTextEditor(editor => {
+		updateStatusBar(getActiveRavenEditor());
+	});
+
+	// On any document change - only if it's the active raven file
 	vscode.workspace.onDidChangeTextDocument((e) => {
-		verificationVerifyingStatusBarItem.show();
-		verificationStatusBarItem.hide();
-		verificationFailedStatusBarItem.hide();
+		const editor = getActiveRavenEditor();
+		if (editor && e.document === editor.document) {
+			verificationVerifyingStatusBarItem.show();
+			verificationSucceededStatusBarItem.hide();
+			verificationFailedStatusBarItem.hide();
+		}
 	});
 
 	// Show/hide the badge based on diagnostics
 	vscode.languages.onDidChangeDiagnostics((e) => {
-		const diagnostics = vscode.languages.getDiagnostics();
-		const hasErrors = diagnostics.some(([uri, diags]) => diags.some(d => d.severity === vscode.DiagnosticSeverity.Error));
-		if (hasErrors) {
-			verificationStatusBarItem.hide();
-			verificationFailedStatusBarItem.show();
-			verificationVerifyingStatusBarItem.hide();
-		} else {
-			verificationFailedStatusBarItem.hide();
-			verificationStatusBarItem.show();
-			verificationVerifyingStatusBarItem.hide();
+		const editor = getActiveRavenEditor();
+		if (editor && e.uris.some(uri => uri.toString() === editor.document.uri.toString())) {
+			// If diagnostics changed for the current file, update.
+			// Note: if we are currently "verifying" (status bar spinning), we might NOT want to immediately clobber it 
+			// if diagnostics arrive mid-verification. BUT usually diagnostics arrive at the END of verification.
+			// So it is safe to update.
+			updateStatusBar(editor);
 		}
 	});
 
 	// Start the client. This will also launch the server
-	client.start();
+	client.start().then(() => {
+		// Initial update
+		updateStatusBar(getActiveRavenEditor());
+	});
+
+	// Register manual verification command
+	context.subscriptions.push(vscode.commands.registerCommand('raven.verify', () => {
+		const editor = getActiveRavenEditor();
+		if (editor) {
+			// Provide immediate feedback
+			verificationVerifyingStatusBarItem.show();
+			verificationSucceededStatusBarItem.hide();
+			verificationFailedStatusBarItem.hide();
+
+			// Trigger verification
+			client.sendNotification('raven/verify', { uri: editor.document.uri.toString() });
+		}
+	}));
 }
 
 export function deactivate(): Thenable<void> | undefined {

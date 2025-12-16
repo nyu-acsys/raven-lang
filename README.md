@@ -8,6 +8,19 @@ This VSCode extension provides language support for the [Raven language and veri
 * Syntax highlighting
 * Diagnostics via integration of the Raven verifier
 
+## Configuration
+
+This extension provides the following settings:
+
+* `ravenServer.maxNumberOfProblems`: Controls the maximum number of problems produced by the server.
+* `ravenServer.trace.server`: Traces the communication between VS Code and the language server.
+* `ravenServer.executablePath`: Path to the Raven executable. Defaults to 'raven' (assumed to be in your PATH).
+
+## Usage
+
+* **Verification**: Verification runs automatically on save.
+* **Manual Verification**: You can trigger verification manually by pressing `Cmd+Shift+R` (Mac) or `Alt+Shift+R` (Windows/Linux) when editing a `.rav` file.
+
 ## Installation
 
 Run

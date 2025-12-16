@@ -23,12 +23,13 @@ import {
 import {
 	TextDocument
 } from 'vscode-languageserver-textdocument';
-import { URI } from 'vscode-uri';
+import { URI, Utils } from 'vscode-uri';
 import { execFile as execCb } from "child_process";
 import { promisify } from "node:util";
 import { match } from "ts-pattern";
 import * as tmp from 'tmp';
 import * as fs from "fs";
+import * as path from 'path';
 
 const connection = createConnection(ProposedFeatures.all);
 
@@ -40,7 +41,7 @@ let hasDiagnosticRelatedInformationCapability = false;
 
 connection.onInitialize((params: InitializeParams) => {
 	const capabilities = params.capabilities;
- 
+
 	// Does the client support the `workspace/configuration` request?
 	// If not, we fall back using global settings.
 	hasConfigurationCapability = !!(
@@ -58,10 +59,6 @@ connection.onInitialize((params: InitializeParams) => {
 	const result: InitializeResult = {
 		capabilities: {
 			textDocumentSync: TextDocumentSyncKind.Full,
-			// Tell the client that this server supports code completion.
-			//completionProvider: {
-			//	resolveProvider: true
-			//},
 			diagnosticProvider: {
 				interFileDependencies: false,
 				workspaceDiagnostics: false
@@ -90,22 +87,19 @@ connection.onInitialized(() => {
 		});
 	}
 	connection.onDidSaveTextDocument(event => {
-		//validateTextDocument(event.textDocument);
+		//validating handled by pull diagnostics usually, but we can trigger refresh
 		connection.languages.diagnostics.refresh();
-		console.log('Received save event ' + event.textDocument.uri);
 	});
 });
 
 // The settings
 interface ServerSettings {
 	maxNumberOfProblems: number;
+	executablePath: string;
 }
 
 // The global settings, used when the `workspace/configuration` request is not supported by the client.
-// Please note that this is not the case when using this server with the client provided in this example
-// but could happen with other clients.
-const defaultSettings: ServerSettings = { maxNumberOfProblems: 1000 };
-// eslint-disable-next-line @typescript-eslint/no-unused-vars 
+const defaultSettings: ServerSettings = { maxNumberOfProblems: 1000, executablePath: 'raven' };
 let globalSettings: ServerSettings = defaultSettings;
 
 // Cache the settings of all open documents
@@ -116,17 +110,15 @@ connection.onDidChangeConfiguration(change => {
 		// Reset all cached document settings
 		documentSettings.clear();
 	} else {
-		globalSettings = (
-			(change.settings.languageServerExample || defaultSettings)
+		globalSettings = <ServerSettings>(
+			(change.settings.ravenServer || defaultSettings)
 		);
 	}
-	// Refresh the diagnostics since the `maxNumberOfProblems` could have changed.
-	// We could optimize things here and re-fetch the setting first can compare it
-	// to the existing setting, but this is out of scope for this example.
+	// Refresh the diagnostics since the settings could have changed.
 	connection.languages.diagnostics.refresh();
 });
 
-/*function getDocumentSettings(resource: string): Thenable<ServerSettings> {
+function getDocumentSettings(resource: string): Thenable<ServerSettings> {
 	if (!hasConfigurationCapability) {
 		return Promise.resolve(globalSettings);
 	}
@@ -139,7 +131,7 @@ connection.onDidChangeConfiguration(change => {
 		documentSettings.set(resource, result);
 	}
 	return result;
-}*/
+}
 
 // Only keep settings for open documents
 documents.onDidClose(e => {
@@ -148,6 +140,12 @@ documents.onDidClose(e => {
 
 // Define progress types for workDoneProgress
 const WorkDoneProgressType = new ProgressType<any>();
+
+// Handle manual verification trigger from client
+connection.onNotification('raven/verify', (params: { uri: string }) => {
+	connection.console.log(`Manual verification triggered for ${params.uri}`);
+	connection.languages.diagnostics.refresh();
+});
 
 connection.languages.diagnostics.on(async (params) => {
 	// Use workDoneToken for progress reporting if present
@@ -180,100 +178,117 @@ connection.languages.diagnostics.on(async (params) => {
 	} satisfies DocumentDiagnosticReport;
 });
 
-// Remove progress logic from validateTextDocument
 async function validateTextDocument(textDocument: TextDocument): Promise<Diagnostic[]> {
+	const settings = await getDocumentSettings(textDocument.uri);
+
 	// Create temporary file from document
-	const file = URI.parse(textDocument.uri).path;
-	const path = file.slice(0, file.lastIndexOf('/'));
-	console.log(`raven ${path}`); 
-	const tmpfile = tmp.fileSync({postfix: ".rav"});
+	// Use vscode-uri to get the directory efficiently
+	const uri = URI.parse(textDocument.uri);
+	const dir = Utils.dirname(uri).fsPath;
+
+	connection.console.log(`raven base dir: ${dir}`);
+
+	const tmpfile = tmp.fileSync({ postfix: ".rav" });
 	fs.appendFileSync(tmpfile.fd, textDocument.getText());
 
 	// Call raven and delete tmp
 	const execFile = promisify(execCb);
-	process.env.PATH = '/Users/ekansh/.opam/raven/bin' + ':' + process.env.PATH;
-	// console.log(process.env.PATH);
-	const {stdout} = await execFile("raven", ["--lsp-mode", "-q", "--base-dir", path, tmpfile.name], { cwd: path, env: process.env });
-	
-	tmpfile.removeCallback();
-	console.log(`Raven response: ${stdout}`);
-	
-	// Start raven output analysis
+
+	// Use configured executable path
+	const executable = settings.executablePath || 'raven';
+
 	const diagnostics: Diagnostic[] = [];
 
-	// No output = no problems found
-	if (stdout == "") {
-		console.log("No errors found");
-		return diagnostics;
-	}
+	try {
+		// connection.console.log(`Executing: ${executable} --lsp-mode -q --base-dir ${dir} ${tmpfile.name}`);
+		const { stdout } = await execFile(executable, ["--lsp-mode", "-q", "--base-dir", dir, tmpfile.name], { cwd: dir });
 
-	// Parse non-empty output
-	const parse = function(stdout: any) {
-		try {
-			return JSON.parse(stdout);
-		} catch (e) {
-			// Report internal error if output is invalid
-			return [{kind: "Internal", file: tmpfile.name, message: ["Failed to parse output of Raven"], start_line: 1, start_col: 0, end_line: 1, end_col: 0}];
+		connection.console.log(`Raven response: ${stdout}`);
+
+		// No output = no problems found
+		if (stdout == "") {
+			return diagnostics;
 		}
-	}
-	
-	const errors: {kind: string, file: string, message: string[], start_line: number, start_col: number, end_line: number, end_col: number}[] = 
-	  parse(stdout);
 
-	// Convert errors into diagnostic reports
-	for(const err of errors) {
-		console.log(err);
-		const kind_string = match(err)
-		  .returnType<string>()
-			.with({ kind: 'Lexical' }, () => 'Lexical Error')
-			.with({ kind: 'Syntax' }, () => 'Syntax Error')
-			.with({ kind: 'Type' }, () => 'Type Error')
-			.with({ kind: 'Verification' }, () => 'Verification Error')
-			.with({ kind: 'Internal' }, () => 'Internal Error')
-			.with({ kind: 'Unsupported' }, () => 'Unsupported Error')
-			.with({ kind: 'RelatedLoc' }, () => 'Related Location')
-			.otherwise(() => "Error");
-
-		console.log(err.message);
-		const msg = err.message.join("\n");
-		
-		if (err.kind == "RelatedLoc") {
-			console.log("adding related loc");
-			if (hasDiagnosticRelatedInformationCapability) {
-				const diagnostic = diagnostics.pop();
-			  if (diagnostic) { 
-					const related = {
-						location: {
-  					  uri: textDocument.uri,
-						  range: {
-							  start: { line: err.start_line - 1, character: err.start_col}, //textDocument.positionAt(err.range_start),
-							  end: { line: err.end_line - 1, character: err.end_col }
-						  },
-						},
-						message: `${msg}`,
-						source: 'raven'
-					};
-				  if (!diagnostic.relatedInformation) {
-			  		diagnostic.relatedInformation = [related];
-			  	} else {
-				    diagnostic.relatedInformation.push(related);
-					}
-					diagnostics.push(diagnostic);
-			  }
+		// Parse non-empty output
+		const parse = function (stdout: any) {
+			try {
+				return JSON.parse(stdout);
+			} catch (e) {
+				// Report internal error if output is invalid
+				return [{ kind: "Internal", file: tmpfile.name, message: ["Failed to parse output of Raven"], start_line: 1, start_col: 0, end_line: 1, end_col: 0 }];
 			}
-		} else {
-			const diagnostic: Diagnostic = {
-				severity: DiagnosticSeverity.Error,
-				range: {
-					start: { line: err.start_line - 1, character: err.start_col}, //textDocument.positionAt(err.range_start),
-					end: { line: err.end_line - 1, character: err.end_col }
-				},
-				message: `[${kind_string}] ${msg}`,
-				source: 'raven'
-			};
-			diagnostics.push(diagnostic);
 		}
-		
+
+		const errors: { kind: string, file: string, message: string[], start_line: number, start_col: number, end_line: number, end_col: number }[] =
+			parse(stdout);
+
+		// Convert errors into diagnostic reports
+		for (const err of errors) {
+			const kind_string = match(err)
+				.returnType<string>()
+				.with({ kind: 'Lexical' }, () => 'Lexical Error')
+				.with({ kind: 'Syntax' }, () => 'Syntax Error')
+				.with({ kind: 'Type' }, () => 'Type Error')
+				.with({ kind: 'Verification' }, () => 'Verification Error')
+				.with({ kind: 'Internal' }, () => 'Internal Error')
+				.with({ kind: 'Unsupported' }, () => 'Unsupported Error')
+				.with({ kind: 'RelatedLoc' }, () => 'Related Location')
+				.otherwise(() => "Error");
+
+			const msg = err.message.join("\n");
+
+			if (err.kind == "RelatedLoc") {
+				if (hasDiagnosticRelatedInformationCapability) {
+					const diagnostic = diagnostics.pop();
+					if (diagnostic) {
+						const related = {
+							location: {
+								uri: textDocument.uri,
+								range: {
+									start: { line: err.start_line - 1, character: err.start_col },
+									end: { line: err.end_line - 1, character: err.end_col }
+								},
+							},
+							message: `${msg}`,
+							source: 'raven'
+						};
+						if (!diagnostic.relatedInformation) {
+							diagnostic.relatedInformation = [related];
+						} else {
+							diagnostic.relatedInformation.push(related);
+						}
+						diagnostics.push(diagnostic);
+					}
+				}
+			} else {
+				const diagnostic: Diagnostic = {
+					severity: DiagnosticSeverity.Error,
+					range: {
+						start: { line: err.start_line - 1, character: err.start_col },
+						end: { line: err.end_line - 1, character: err.end_col }
+					},
+					message: `[${kind_string}] ${msg}`,
+					source: 'raven'
+				};
+				diagnostics.push(diagnostic);
+			}
+		}
+	} catch (error: any) {
+		connection.console.error(`Error executing Raven: ${error.message}`);
+		// Optionally report a diagnostic if Raven fails to run
+		const diagnostic: Diagnostic = {
+			severity: DiagnosticSeverity.Warning,
+			range: {
+				start: { line: 0, character: 0 },
+				end: { line: 0, character: 0 }
+			},
+			message: `Failed to execute Raven verifier. Please check 'ravenServer.executablePath'. Error: ${error.message}`,
+			source: 'raven'
+		};
+		diagnostics.push(diagnostic);
+	} finally {
+		tmpfile.removeCallback();
 	}
 
 	return diagnostics;
@@ -281,35 +296,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 
 connection.onDidChangeWatchedFiles(_change => {
 	// Monitored files have change in VSCode
-	console.log('We received a file change event');
+	connection.console.log('We received a file change event');
 });
-
-connection.onDidSaveTextDocument((document) => {
-	console.log('We received a save event ' + document.textDocument.uri);
-});
-
-
-
-// This handler provides the initial list of the completion items.
-/*connection.onCompletion(
-	(_textDocumentPosition: TextDocumentPositionParams): CompletionItem[] => {
-		// The pass parameter contains the position of the text document in
-		// which code complete got requested. For the example we ignore this
-		// info and always provide the same completion items.
-		return [
-			{
-				label: 'TypeScript',
-				kind: CompletionItemKind.Text,
-				data: 1
-			},
-			{
-				label: 'JavaScript',
-				kind: CompletionItemKind.Text,
-				data: 2
-			}
-		];
-	}
-);*/
 
 // This handler resolves additional information for the item selected in
 // the completion list.

@@ -1,23 +1,26 @@
 {
-  "name": "raven",
-  "displayName": "Raven Verifier",
-  "description": "VSCode integration of the Raven language and verifier.",
-  "icon": "images/logo.png",
+	"name": "raven",
+	"displayName": "Raven Verifier",
+	"description": "VSCode integration of the Raven language and verifier.",
+	"icon": "images/logo.png",
 	"version": "1.0.0",
-  "engines": {
-    "vscode": "^1.95.0" 
-  },
-  "categories": [
-    "Programming Languages"
-  ],
-  "publisher": "nyu-acsys",
-  "license": "See LICENSE file",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/nyu-acsys/raven-lang.git"
-  },
-  "main": "./client/out/extension",
-  "contributes": {
+	"engines": {
+		"vscode": "^1.95.0"
+	},
+	"categories": [
+		"Programming Languages"
+	],
+	"publisher": "nyu-acsys",
+	"license": "See LICENSE file",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/nyu-acsys/raven-lang.git"
+	},
+	"main": "./client/out/extension",
+	"activationEvents": [
+		"onLanguage:raven"
+	],
+	"contributes": {
 		"configuration": {
 			"type": "object",
 			"title": "Raven configuration",
@@ -38,22 +41,52 @@
 					],
 					"default": "off",
 					"description": "Traces the communication between VS Code and the language server."
+				},
+				"ravenServer.executablePath": {
+					"scope": "resource",
+					"type": "string",
+					"default": "raven",
+					"description": "Path to the Raven executable. Defaults to 'raven' (in PATH)."
 				}
 			}
 		},
-    "languages": [{
-      "id": "raven",
-      "aliases": ["Raven", "raven"],
-      "extensions": [".rav"],
-      "configuration": "./language-configuration.json"
-    }],
-    "grammars": [{
-      "language": "raven",
-      "scopeName": "source.raven",
-      "path": "./syntaxes/raven.tmLanguage.json"
-    }]
-  },
-  "scripts": {
+		"commands": [
+			{
+				"command": "raven.verify",
+				"title": "Raven: Verify File",
+				"category": "Raven"
+			}
+		],
+		"keybindings": [
+			{
+				"command": "raven.verify",
+				"key": "shift+alt+r",
+				"mac": "shift+cmd+r",
+				"when": "editorTextFocus && resourceLangId == raven"
+			}
+		],
+		"languages": [
+			{
+				"id": "raven",
+				"aliases": [
+					"Raven",
+					"raven"
+				],
+				"extensions": [
+					".rav"
+				],
+				"configuration": "./language-configuration.json"
+			}
+		],
+		"grammars": [
+			{
+				"language": "raven",
+				"scopeName": "source.raven",
+				"path": "./syntaxes/raven.tmLanguage.json"
+			}
+		]
+	},
+	"scripts": {
 		"vscode:prepublish": "npm run compile",
 		"compile": "tsc -b",
 		"watch": "tsc -b -w",
@@ -70,8 +103,8 @@
 		"eslint": "^9.13.0",
 		"mocha": "^10.3.0",
 		"typescript": "^5.6.2",
-	        "typescript-eslint": "^8.11.0",
-                "vscode": "^1.1.37"		
+		"typescript-eslint": "^8.11.0",
+		"vscode": "^1.1.37"
 	},
 	"dependencies": {
 		"tmp": "^0.2.3",
