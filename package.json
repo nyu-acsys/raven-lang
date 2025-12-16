@@ -1,5 +1,5 @@
 {
-	"name": "raven",
+	"name": "raven-ivl",
 	"displayName": "Raven Verifier",
 	"description": "VSCode integration of the Raven language and verifier.",
 	"icon": "images/logo.png",
@@ -10,7 +10,7 @@
 	"categories": [
 		"Programming Languages"
 	],
-	"publisher": "nyu-acsys",
+	"publisher": "eg3134",
 	"license": "See LICENSE file",
 	"repository": {
 		"type": "git",
@@ -26,6 +26,7 @@
 		"program verification",
 		"language server",
 		"ivl",
+		"verifier",
 		"verification language",
 		"intermediate verification language"
 	],
