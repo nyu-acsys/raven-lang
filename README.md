@@ -1,6 +1,16 @@
 # Raven VS Code Extension
 
+**[Download on Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=eg3134.raven-ivl)**
+
 VS Code integration for the **Raven** language and verification tool.
+
+## Installation
+
+You can install this extension directly from the Marketplace, or run the following command in VS Code:
+
+```bash
+code --install-extension eg3134.raven-ivl
+```
 
 ## Features
 
