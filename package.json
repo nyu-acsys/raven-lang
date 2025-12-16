@@ -16,6 +16,19 @@
 		"type": "git",
 		"url": "https://github.com/nyu-acsys/raven-lang.git"
 	},
+	"bugs": {
+		"url": "https://github.com/nyu-acsys/raven-lang/issues"
+	},
+	"keywords": [
+		"raven IVL",
+		"verification",
+		"formal methods",
+		"program verification",
+		"language server",
+		"ivl",
+		"verification language",
+		"intermediate verification language"
+	],
 	"main": "./client/out/extension",
 	"activationEvents": [
 		"onLanguage:raven"
