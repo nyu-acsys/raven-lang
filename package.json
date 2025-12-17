@@ -3,7 +3,7 @@
 	"displayName": "Raven Verifier",
 	"description": "VSCode integration of the Raven language and verifier.",
 	"icon": "images/logo.png",
-	"version": "1.0.1",
+	"version": "1.0.2",
 	"engines": {
 		"vscode": "^1.95.0"
 	},
