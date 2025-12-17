@@ -1,0 +1,4 @@
+proc p() {
+    var z := 1;
+    assert z == 0;
+}
