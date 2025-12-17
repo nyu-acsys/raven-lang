@@ -24,7 +24,8 @@ code --install-extension eg3134.raven-ivl
 2. **Configure Path**: If `raven` is not in your system `PATH`, you **must** set the `ravenServer.executablePath` setting in VS Code to point to the `raven` executable.
    - Go to Settings (`Cmd+,` / `Ctrl+,`)
    - Search for "Raven"
-   - Set "Executable Path" to the absolute path of your `raven` binary (example, on macOS: /Users/ekansh/.opam/raven/bin/raven).
+   - Set "Executable Path" to the absolute path of your `raven` binary 
+    (example, on macOS: `/Users/ekansh/.opam/raven/bin/raven`).
 
 ## Features
 
