@@ -12,6 +12,8 @@ You can install this extension directly from the [Marketplace](https://marketpla
 code --install-extension eg3134.raven-ivl
 ```
 
+Remember to update the `ravenServer.executablePath` setting before using the extension. This should point to the `raven` executable. 
+
 ## Features
 
 - **Syntax Highlighting**: Proper highlighting for `.rav` files.
