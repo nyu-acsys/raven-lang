@@ -2,7 +2,13 @@
 
 **[Download on Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=eg3134.raven-ivl)**
 
-VS Code integration for the [Raven](https://github.com/nyu-acsys/raven-lang) intermediate verification language and verification tool.
+VS Code integration for the [Raven intermediate verification language](https://github.com/nyu-acsys/raven) and verification tool.
+
+## Prerequisites
+
+This extension **requires** the Raven verifier to be installed on your system. It does not bundle the verifier itself.
+
+Please follow the installation instructions at the [Raven repository](https://github.com/nyu-acsys/raven) to install the command-line tool.
 
 ## Installation
 
@@ -12,7 +18,13 @@ You can install this extension directly from the [Marketplace](https://marketpla
 code --install-extension eg3134.raven-ivl
 ```
 
-Remember to update the `ravenServer.executablePath` setting before using the extension. This should point to the `raven` executable. 
+## First Usage
+
+1. **Install Raven**: Ensure `raven` is installed (see Prerequisites).
+2. **Configure Path**: If `raven` is not in your system `PATH`, you **must** set the `ravenServer.executablePath` setting in VS Code to point to the `raven` executable.
+   - Go to Settings (`Cmd+,` / `Ctrl+,`)
+   - Search for "Raven"
+   - Set "Executable Path" to the absolute path of your `raven` binary.
 
 ## Features
 
@@ -34,9 +46,9 @@ This extension provides the following settings:
 * **Verification**: Verification runs automatically on save.
 * **Manual Verification**: You can trigger verification manually by pressing `Cmd+Shift+R` (Mac) or `Alt+Shift+R` (Windows/Linux) when editing a `.rav` file.
 
-## Installation
+## Building from Source
 
-Run
+To develop or build the extension locally:
 
 ```bash
 $ npm install
