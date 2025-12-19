@@ -246,8 +246,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 							location: {
 								uri: textDocument.uri,
 								range: {
-									start: { line: err.start_line - 1, character: err.start_col },
-									end: { line: err.end_line - 1, character: err.end_col }
+									start: { line: Math.max(0, err.start_line - 1), character: Math.max(0, err.start_col) },
+									end: { line: Math.max(0, err.end_line - 1), character: Math.max(0, err.end_col) }
 								},
 							},
 							message: `${msg}`,
@@ -265,8 +265,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 				const diagnostic: Diagnostic = {
 					severity: DiagnosticSeverity.Error,
 					range: {
-						start: { line: err.start_line - 1, character: err.start_col },
-						end: { line: err.end_line - 1, character: err.end_col }
+						start: { line: Math.max(0, err.start_line - 1), character: Math.max(0, err.start_col) },
+						end: { line: Math.max(0, err.end_line - 1), character: Math.max(0, err.end_col) }
 					},
 					message: `[${kind_string}] ${msg}`,
 					source: 'raven'
