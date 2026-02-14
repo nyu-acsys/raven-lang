@@ -53,6 +53,10 @@
 			"patterns": [{
 				"name": "storage.modifier.raven",
 				"match": "\\b(auto|ghost|implicit|rep)\\b"
+			},
+		  {
+				"name": "invalid.illegal",
+				"match": "\\b(free)\\b"
 			}]
 		},
 		"specs": {
