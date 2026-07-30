@@ -1,24 +1,21 @@
+<table>
+<tr>
+<td width="200"><img width="200" src=".github/assets/logo.png"/></td>
+<td>
+
 # Raven VS Code Extension
 
-<img align="right" width="200" src=".github/assets/logo.png"/>
+VS Code integration for the [Raven intermediate verification language](https://github.com/nyu-acsys/raven) and verification tool. This is the extension's source — for installation and day-to-day usage, see the [Marketplace listing](https://marketplace.visualstudio.com/items?itemName=nyu-acsys.raven-verifier); the docs below cover building and developing the extension itself.
 
-**[Download on Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=eg3134.raven-ivl)**
-
-VS Code integration for the [Raven intermediate verification language](https://github.com/nyu-acsys/raven) and verification tool.
+</td>
+</tr>
+</table>
 
 ## Prerequisites
 
 None. This extension bundles the Raven verifier and Z3 for your platform (Linux x64/arm64, macOS x64/arm64, Windows x64), so nothing needs to be installed separately.
 
 If you're developing Raven itself and want to verify against a local build instead of the bundled binary, see [First Usage](#first-usage) below.
-
-## Installation
-
-You can install this extension directly from the [Marketplace](https://marketplace.visualstudio.com/items?itemName=eg3134.raven-ivl), or run the following command in VS Code:
-
-```bash
-code --install-extension eg3134.raven-ivl
-```
 
 ## First Usage
 
@@ -32,13 +29,6 @@ To point it at a different `raven` build instead (e.g. a local development build
 
 This overrides the bundled binary for the current scope (e.g. per workspace), which is convenient for testing changes to Raven itself without reinstalling the extension. Z3 must still be reachable — either the bundled copy (found automatically) or one on your own `PATH`.
 
-## Features
-
-- **Syntax Highlighting**: Proper highlighting for `.rav` files.
-- **Verification**: Automatic verification on save, with error diagnostics.
-- **Manual Verification**: Trigger verification manually with `Cmd+Shift+R`.
-- **Diagnostics**: Errors and warnings shown directly in the editor.
-
 ## Configuration
 
 This extension provides the following settings:
@@ -46,11 +36,6 @@ This extension provides the following settings:
 * `ravenServer.maxNumberOfProblems`: Controls the maximum number of problems produced by the server.
 * `ravenServer.trace.server`: Traces the communication between VS Code and the language server.
 * `ravenServer.executablePath`: Path to the Raven executable. Leave empty to use the verifier bundled with the extension.
-
-## Usage
-
-* **Verification**: Verification runs automatically on save.
-* **Manual Verification**: You can trigger verification manually by pressing `Cmd+Shift+R` (Mac) or `Alt+Shift+R` (Windows/Linux) when editing a `.rav` file.
 
 ## Building from Source
 

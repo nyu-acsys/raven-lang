@@ -1,5 +1,5 @@
 {
-	"name": "raven-ivl",
+	"name": "raven-verifier",
 	"displayName": "Raven Verifier",
 	"description": "VSCode integration of the Raven language and verifier.",
 	"icon": "images/logo.png",
