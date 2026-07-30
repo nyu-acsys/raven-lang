@@ -7,7 +7,7 @@ VS Code integration for the [Raven intermediate verification language](https://g
 ## Features
 
 - **Syntax Highlighting**: Proper highlighting for `.rav` files.
-- **Verification**: Automatic verification on save, with error diagnostics.
+- **Verification**: Automatic verification as you edit, with error diagnostics.
 - **Manual Verification**: Trigger verification manually with `Cmd+Shift+R`.
 - **Diagnostics**: Errors and warnings shown directly in the editor.
 
@@ -25,7 +25,7 @@ code --install-extension nyu-acsys.raven-verifier
 
 ## Usage
 
-* **Verification**: Verification runs automatically on save.
+* **Verification**: Verification runs automatically as you edit — no need to save first.
 * **Manual Verification**: You can trigger verification manually by pressing `Cmd+Shift+R` (Mac) or `Alt+Shift+R` (Windows/Linux) when editing a `.rav` file.
 
 ## Configuration
