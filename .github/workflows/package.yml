@@ -93,7 +93,7 @@ jobs:
           rm -rf z3.zip z3-extracted
 
       - name: Package vsix
-        run: npx @vscode/vsce package --target ${{ matrix.vsce_target }} --out raven-ivl-${{ matrix.vsce_target }}.vsix
+        run: npx @vscode/vsce package --target ${{ matrix.vsce_target }} --out raven-ivl-${{ matrix.vsce_target }}.vsix --readme-path MARKETPLACE.md
 
       - name: Upload vsix
         uses: actions/upload-artifact@v4

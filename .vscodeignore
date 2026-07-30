@@ -11,4 +11,5 @@ server/src
 test
 **/*.map
 .github/**
+!.github/assets/**
 node_modules/**/src

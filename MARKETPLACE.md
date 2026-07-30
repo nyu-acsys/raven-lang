@@ -1,6 +1,6 @@
-# Raven VS Code Extension
-
-<img align="right" width="200" src=".github/assets/logo.png"/>
+<p align="center">
+  <img width="100%" src=".github/assets/banner.png" alt="Raven Verifier"/>
+</p>
 
 **[Download on Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=eg3134.raven-ivl)**
 
