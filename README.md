@@ -6,9 +6,9 @@ VS Code integration for the [Raven intermediate verification language](https://g
 
 ## Prerequisites
 
-This extension **requires** the Raven verifier to be installed on your system. It does not bundle the verifier itself.
+None. This extension bundles the Raven verifier and Z3 for your platform (Linux x64/arm64, macOS x64/arm64, Windows x64), so nothing needs to be installed separately.
 
-Please follow the installation instructions at the [Raven repository](https://github.com/nyu-acsys/raven) to install the command-line tool.
+If you're developing Raven itself and want to verify against a local build instead of the bundled binary, see [First Usage](#first-usage) below.
 
 ## Installation
 
@@ -20,12 +20,15 @@ code --install-extension eg3134.raven-ivl
 
 ## First Usage
 
-1. **Install Raven**: Ensure `raven` is installed (see Prerequisites).
-2. **Configure Path**: If `raven` is not in your system `PATH`, you **must** set the `ravenServer.executablePath` setting in VS Code to point to the `raven` executable.
+The extension works out of the box using its bundled verifier — no configuration needed.
+
+To point it at a different `raven` build instead (e.g. a local development build), set the `ravenServer.executablePath` setting:
    - Go to Settings (`Cmd+,` / `Ctrl+,`)
    - Search for "Raven"
-   - Set "Executable Path" to the absolute path of your `raven` binary 
-    (example, on macOS: `/Users/ekansh/.opam/raven/bin/raven`).
+   - Set "Executable Path" to the absolute path of the `raven` binary you want to use
+    (example: `/path/to/raven/_build/default/bin/raven.exe`).
+
+This overrides the bundled binary for the current scope (e.g. per workspace), which is convenient for testing changes to Raven itself without reinstalling the extension. Z3 must still be reachable — either the bundled copy (found automatically) or one on your own `PATH`.
 
 ## Features
 
@@ -40,7 +43,7 @@ This extension provides the following settings:
 
 * `ravenServer.maxNumberOfProblems`: Controls the maximum number of problems produced by the server.
 * `ravenServer.trace.server`: Traces the communication between VS Code and the language server.
-* `ravenServer.executablePath`: Path to the Raven executable. Defaults to 'raven' (assumed to be in your PATH).
+* `ravenServer.executablePath`: Path to the Raven executable. Leave empty to use the verifier bundled with the extension.
 
 ## Usage
 
@@ -56,3 +59,5 @@ $ npm install
 $ npx @vscode/vsce package
 $ code --install-extension raven-1.0.0.vsix
 ```
+
+A plain `vsce package` like this produces an unbundled extension (no `raven`/`z3` included) — fine for extension development, but you'll need `ravenServer.executablePath` set (see First Usage) to actually verify anything. Platform-specific packages that bundle `raven`/`z3` are built by [`.github/workflows/package.yml`](.github/workflows/package.yml), which downloads binaries pinned in [`RAVEN_VERSION`](RAVEN_VERSION) and [`Z3_VERSION`](Z3_VERSION) and runs `vsce package --target <platform>`.

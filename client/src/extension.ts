@@ -4,6 +4,7 @@
  * ------------------------------------------------------------------------------------------ */
 
 import * as path from 'path';
+import { execFile } from 'child_process';
 import { workspace, ExtensionContext } from 'vscode';
 import * as vscode from 'vscode';
 import { ProgressType } from 'vscode-languageclient';
@@ -55,6 +56,18 @@ export function activate(context: ExtensionContext) {
 	const serverModule = context.asAbsolutePath(
 		path.join('server', 'out', 'server.js')
 	);
+
+	// Populated only in platform-specific packages that bundle raven/z3;
+	// absent (and harmless) when running from source or an unbundled build.
+	const bundledBinDir = context.asAbsolutePath(path.join('bundled', 'bin'));
+
+	if (process.platform === 'darwin') {
+		// Marketplace downloads land with com.apple.quarantine set, which makes
+		// Gatekeeper refuse to run the unsigned bundled binaries. Best-effort
+		// strip; harmless if the dir doesn't exist or xattr isn't present.
+		execFile('xattr', ['-dr', 'com.apple.quarantine', bundledBinDir], () => { /* ignore errors */ });
+	}
+
 	let debugOptions = { execArgv: ['--nolazy', '--inspect=6009'] };
 	// If the extension is launched in debug mode then the debug server options are used
 	// Otherwise the run options are used
@@ -74,6 +87,9 @@ export function activate(context: ExtensionContext) {
 		synchronize: {
 			// Notify the server about file changes to '.clientrc files contained in the workspace
 			fileEvents: workspace.createFileSystemWatcher('**/.clientrc')
+		},
+		initializationOptions: {
+			bundledBinDir
 		}
 	};
 

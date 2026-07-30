@@ -3,14 +3,14 @@
 	"displayName": "Raven Verifier",
 	"description": "VSCode integration of the Raven language and verifier.",
 	"icon": "images/logo.png",
-	"version": "1.0.6",
+	"version": "1.1.0",
 	"engines": {
 		"vscode": "^1.95.0"
 	},
 	"categories": [
 		"Programming Languages"
 	],
-	"publisher": "eg3134",
+	"publisher": "nyu-acsys",
 	"license": "See LICENSE file",
 	"repository": {
 		"type": "git",
@@ -59,8 +59,8 @@
 				"ravenServer.executablePath": {
 					"scope": "resource",
 					"type": "string",
-					"default": "raven",
-					"description": "Path to the Raven executable. Defaults to 'raven' (in PATH)."
+					"default": "",
+					"description": "Path to the Raven executable. Leave empty to use the verifier bundled with this extension; set this to point at a different build (e.g. a local dev build) instead."
 				}
 			}
 		},

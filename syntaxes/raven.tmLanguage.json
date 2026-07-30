@@ -62,7 +62,7 @@
 		"specs": {
 			"patterns": [{
 				"name": "keyword.other.raven",
-				"match": "\\b(requires|ensures|returns|atomic|invariant)\\b"
+				"match": "\\b(requires|ensures|returns|atomic|invariant|decreases)\\b"
 			}]
 		},
 		"constants": {

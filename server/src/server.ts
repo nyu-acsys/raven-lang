@@ -39,8 +39,16 @@ let hasConfigurationCapability = false;
 let hasWorkspaceFolderCapability = false;
 let hasDiagnosticRelatedInformationCapability = false;
 
+// Directory bundled alongside the extension containing platform-specific
+// `raven`/`z3` binaries. Set via initializationOptions by the client; empty
+// when running from source or an unbundled build (e.g. during development).
+let bundledBinDir = '';
+
 connection.onInitialize((params: InitializeParams) => {
 	const capabilities = params.capabilities;
+
+	const initOptions = params.initializationOptions as { bundledBinDir?: string } | undefined;
+	bundledBinDir = initOptions?.bundledBinDir ?? '';
 
 	// Does the client support the `workspace/configuration` request?
 	// If not, we fall back using global settings.
@@ -99,7 +107,7 @@ interface ServerSettings {
 }
 
 // The global settings, used when the `workspace/configuration` request is not supported by the client.
-const defaultSettings: ServerSettings = { maxNumberOfProblems: 1000, executablePath: 'raven' };
+const defaultSettings: ServerSettings = { maxNumberOfProblems: 1000, executablePath: '' };
 let globalSettings: ServerSettings = defaultSettings;
 
 // Cache the settings of all open documents
@@ -194,14 +202,25 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 	// Call raven and delete tmp
 	const execFile = promisify(execCb);
 
-	// Use configured executable path
-	const executable = settings.executablePath || 'raven';
+	// An explicit `ravenServer.executablePath` always wins (dev-build override).
+	// Otherwise fall back to the binary bundled with the extension, if any.
+	const bundledExecutable = bundledBinDir
+		? path.join(bundledBinDir, process.platform === 'win32' ? 'raven.exe' : 'raven')
+		: undefined;
+	const executable = settings.executablePath || bundledExecutable || 'raven';
+
+	// Make the bundled z3 discoverable on PATH -- raven finds z3 via a PATH
+	// search when it spawns it, whether raven itself is the bundled binary or
+	// a locally-built dev copy.
+	const env = bundledBinDir
+		? { ...process.env, PATH: `${bundledBinDir}${path.delimiter}${process.env.PATH ?? ''}` }
+		: process.env;
 
 	const diagnostics: Diagnostic[] = [];
 
 	try {
 		// connection.console.log(`Executing: ${executable} --lsp-mode -q --base-dir ${dir} ${tmpfile.name}`);
-		const { stdout } = await execFile(executable, ["--lsp-mode", "-q", "--base-dir", dir, tmpfile.name], { cwd: dir });
+		const { stdout } = await execFile(executable, ["--lsp-mode", "-q", "--base-dir", dir, tmpfile.name], { cwd: dir, env });
 
 		connection.console.log(`Raven response: ${stdout}`);
 

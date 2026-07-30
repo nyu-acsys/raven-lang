@@ -1,0 +1,103 @@
+name: Package bundled extension
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - vsce_target: linux-x64
+            raven_artifact: raven-linux-x64
+            z3_asset_regex: x64-glibc
+            bin_ext: ""
+          - vsce_target: linux-arm64
+            raven_artifact: raven-linux-arm64
+            z3_asset_regex: arm64-glibc
+            bin_ext: ""
+          - vsce_target: darwin-x64
+            raven_artifact: raven-darwin-x64
+            z3_asset_regex: x64-osx
+            bin_ext: ""
+          - vsce_target: darwin-arm64
+            raven_artifact: raven-darwin-arm64
+            z3_asset_regex: arm64-osx
+            bin_ext: ""
+          - vsce_target: win32-x64
+            raven_artifact: raven-win32-x64
+            z3_asset_regex: x64-win
+            bin_ext: ".exe"
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tree
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Compile extension
+        run: npm run compile
+
+      - name: Fetch bundled raven binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          raven_version=$(cat RAVEN_VERSION)
+          if [ "$raven_version" = "unreleased" ]; then
+            echo "RAVEN_VERSION is still the placeholder value 'unreleased' -- cut a raven release and update RAVEN_VERSION before packaging." >&2
+            exit 1
+          fi
+          mkdir -p bundled/bin
+          gh release download "$raven_version" \
+            --repo nyu-acsys/raven \
+            --pattern "${{ matrix.raven_artifact }}.tar.gz" \
+            --output raven.tar.gz
+          tar -xzf raven.tar.gz -C bundled/bin
+          chmod +x bundled/bin/raven${{ matrix.bin_ext }}
+          rm raven.tar.gz
+
+      - name: Fetch bundled Z3 binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          z3_version=$(cat Z3_VERSION)
+          asset=$(gh api "repos/Z3Prover/z3/releases/tags/${z3_version}" \
+            --jq ".assets[] | select(.name | test(\"${{ matrix.z3_asset_regex }}\")) | .name")
+          if [ -z "$asset" ]; then
+            echo "No Z3 release asset matched pattern '${{ matrix.z3_asset_regex }}' for tag ${z3_version}" >&2
+            exit 1
+          fi
+          gh release download "$z3_version" \
+            --repo Z3Prover/z3 \
+            --pattern "$asset" \
+            --output z3.zip
+          unzip -q z3.zip -d z3-extracted
+          find z3-extracted -type f -name "z3${{ matrix.bin_ext }}" -path "*/bin/*" -exec cp {} bundled/bin/z3${{ matrix.bin_ext }} \;
+          chmod +x bundled/bin/z3${{ matrix.bin_ext }}
+          rm -rf z3.zip z3-extracted
+
+      - name: Package vsix
+        run: npx @vscode/vsce package --target ${{ matrix.vsce_target }} --out raven-ivl-${{ matrix.vsce_target }}.vsix
+
+      - name: Upload vsix
+        uses: actions/upload-artifact@v4
+        with:
+          name: raven-ivl-${{ matrix.vsce_target }}
+          path: raven-ivl-${{ matrix.vsce_target }}.vsix
+          if-no-files-found: error

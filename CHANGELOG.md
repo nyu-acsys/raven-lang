@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Bundled `raven` and `z3` binaries: platform-specific packages (Linux x64/arm64, macOS x64/arm64, Windows x64) no longer require installing the verifier or Z3 separately. `ravenServer.executablePath` still overrides the bundled binary (e.g. to test a local development build).
 - Manual verification trigger command: `Raven: Verify File` (`Cmd+Shift+R` / `Alt+Shift+R`).
   - Includes immediate visual feedback ("Verifying..." spinner) when triggered.
 - Configuration setting `ravenServer.executablePath` to specify the path to the Raven binary.
