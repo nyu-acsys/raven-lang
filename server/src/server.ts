@@ -14,6 +14,7 @@ import {
 	//FileChangeType,
 	DocumentDiagnosticReportKind,
 	type DocumentDiagnosticReport,
+	type DiagnosticRelatedInformation,
 	//TextDocumentIdentifier
 	WorkDoneProgressBegin,
 	WorkDoneProgressEnd,
@@ -242,6 +243,31 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 		const errors: { kind: string, file: string, message: string[], start_line: number, start_col: number, end_line: number, end_col: number }[] =
 			parse(stdout);
 
+		// Raven reports every location in whatever file it is really in: the temporary
+		// copy of this document, or a file reached through `include`. Only the temp copy
+		// needs rewriting -- everything else is a real path already, and passing it
+		// through is what makes a related location clickable rather than silently
+		// redirected at the file being edited.
+		const tmpfileResolved = path.resolve(tmpfile.name);
+		const uriForFile = function (file: string): string {
+			const resolved = path.resolve(dir, file);
+			return resolved === tmpfileResolved ? textDocument.uri : URI.file(resolved).toString();
+		};
+
+		const rangeOf = function (e: { start_line: number, start_col: number, end_line: number, end_col: number }) {
+			return {
+				start: { line: Math.max(0, e.start_line - 1), character: Math.max(0, e.start_col) },
+				end: { line: Math.max(0, e.end_line - 1), character: Math.max(0, e.end_col) }
+			};
+		};
+
+		// A related location may be reported either before or after the diagnostic it
+		// explains -- Raven prints the declaration a rule was inherited from ahead of the
+		// failure, and the unproven assertion after it. Leading ones used to be dropped
+		// outright (`diagnostics.pop()` on an empty array), so buffer them and attach
+		// them to the next diagnostic instead.
+		let pendingRelated: DiagnosticRelatedInformation[] = [];
+
 		// Convert errors into diagnostic reports
 		for (const err of errors) {
 			const kind_string = match(err)
@@ -259,37 +285,28 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 
 			if (err.kind == "RelatedLoc") {
 				if (hasDiagnosticRelatedInformationCapability) {
-					const diagnostic = diagnostics.pop();
-					if (diagnostic) {
-						const related = {
-							location: {
-								uri: textDocument.uri,
-								range: {
-									start: { line: Math.max(0, err.start_line - 1), character: Math.max(0, err.start_col) },
-									end: { line: Math.max(0, err.end_line - 1), character: Math.max(0, err.end_col) }
-								},
-							},
-							message: `${msg}`,
-							source: 'raven'
-						};
-						if (!diagnostic.relatedInformation) {
-							diagnostic.relatedInformation = [related];
-						} else {
-							diagnostic.relatedInformation.push(related);
-						}
-						diagnostics.push(diagnostic);
+					const related: DiagnosticRelatedInformation = {
+						location: { uri: uriForFile(err.file), range: rangeOf(err) },
+						message: `${msg}`
+					};
+					const previous = diagnostics[diagnostics.length - 1];
+					if (previous) {
+						previous.relatedInformation = [...(previous.relatedInformation ?? []), related];
+					} else {
+						pendingRelated.push(related);
 					}
 				}
 			} else {
 				const diagnostic: Diagnostic = {
 					severity: DiagnosticSeverity.Error,
-					range: {
-						start: { line: Math.max(0, err.start_line - 1), character: Math.max(0, err.start_col) },
-						end: { line: Math.max(0, err.end_line - 1), character: Math.max(0, err.end_col) }
-					},
+					range: rangeOf(err),
 					message: `[${kind_string}] ${msg}`,
 					source: 'raven'
 				};
+				if (pendingRelated.length > 0) {
+					diagnostic.relatedInformation = pendingRelated;
+					pendingRelated = [];
+				}
 				diagnostics.push(diagnostic);
 			}
 		}

@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Status Bar Cleanup**: Fixed "sticky" status bar issue where verification results persisted after switching files. The status bar now correctly listens to active editor changes and hides for non-Raven files.
+- **Related Locations**: A diagnostic's related locations now point at the file they are actually in, making them a clickable jump to the declaration that was violated (e.g. the interface axiom a module fails to satisfy, in the file that declares it). They were previously built with the URI of the file being edited regardless of where Raven reported them, so a location in an included file was rendered at those coordinates in the wrong file. Related locations reported *before* the diagnostic they explain — as Raven does for the declaration a rule was inherited from — were also dropped entirely, and now survive. Needs the paired verifier change ("Keep related locations intact in `--lsp-mode`"); against a verifier without it these locations remain collapsed onto the `include` directive as before. where verification results persisted after switching files. The status bar now correctly listens to active editor changes and hides for non-Raven files.
 - **Race Conditions**: Refactored status bar logic into a centralized update function to prevent `Verifying` and `Success` states from conflicting.
 - **Hardcoded Paths**: Removed hardcoded executable paths in the server that caused crashes on non-author machines. The extension now uses the configured path or defaults to `raven` in PATH.
 - Improved error handling for Raven execution.
