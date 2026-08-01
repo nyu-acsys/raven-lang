@@ -1,128 +1,134 @@
 {
-	"name": "raven-verifier",
-	"displayName": "Raven Verifier",
-	"description": "VSCode integration of the Raven language and verifier.",
-	"icon": "images/logo.png",
-	"version": "1.1.0",
-	"engines": {
-		"vscode": "^1.95.0"
-	},
-	"categories": [
-		"Programming Languages"
-	],
-	"publisher": "nyu-acsys",
-	"license": "See LICENSE file",
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/nyu-acsys/raven-lang.git"
-	},
-	"bugs": {
-		"url": "https://github.com/nyu-acsys/raven-lang/issues"
-	},
-	"keywords": [
-		"raven IVL",
-		"verification",
-		"formal methods",
-		"program verification",
-		"language server",
-		"ivl",
-		"verifier",
-		"verification language",
-		"intermediate verification language"
-	],
-	"main": "./client/out/extension",
-	"activationEvents": [
-		"onLanguage:raven"
-	],
-	"contributes": {
-		"configuration": {
-			"type": "object",
-			"title": "Raven configuration",
-			"properties": {
-				"ravenServer.maxNumberOfProblems": {
-					"scope": "resource",
-					"type": "number",
-					"default": 100,
-					"description": "Controls the maximum number of problems produced by the server."
-				},
-				"ravenServer.trace.server": {
-					"scope": "window",
-					"type": "string",
-					"enum": [
-						"off",
-						"messages",
-						"verbose"
-					],
-					"default": "off",
-					"description": "Traces the communication between VS Code and the language server."
-				},
-				"ravenServer.executablePath": {
-					"scope": "resource",
-					"type": "string",
-					"default": "",
-					"description": "Path to the Raven executable. Leave empty to use the verifier bundled with this extension; set this to point at a different build (e.g. a local dev build) instead."
-				}
-			}
-		},
-		"commands": [
-			{
-				"command": "raven.verify",
-				"title": "Raven: Verify File",
-				"category": "Raven"
-			}
-		],
-		"keybindings": [
-			{
-				"command": "raven.verify",
-				"key": "shift+alt+r",
-				"mac": "shift+cmd+r",
-				"when": "editorTextFocus && resourceLangId == raven"
-			}
-		],
-		"languages": [
-			{
-				"id": "raven",
-				"aliases": [
-					"Raven",
-					"raven"
-				],
-				"extensions": [
-					".rav"
-				],
-				"configuration": "./language-configuration.json"
-			}
-		],
-		"grammars": [
-			{
-				"language": "raven",
-				"scopeName": "source.raven",
-				"path": "./syntaxes/raven.tmLanguage.json"
-			}
-		]
-	},
-	"scripts": {
-		"vscode:prepublish": "npm run compile",
-		"compile": "tsc -b",
-		"watch": "tsc -b -w",
-		"lint": "eslint",
-		"postinstall": "cd client && npm install && cd ../server && npm install && cd ..",
-		"test": "sh ./scripts/e2e.sh"
-	},
-	"devDependencies": {
-		"@eslint/js": "^9.13.0",
-		"@stylistic/eslint-plugin": "^2.9.0",
-		"@types/mocha": "^10.0.6",
-		"@types/node": "^20",
-		"@types/tmp": "^0.2.6",
-		"eslint": "^9.13.0",
-		"mocha": "^10.3.0",
-		"typescript": "^5.6.2",
-		"typescript-eslint": "^8.11.0",
-		"vscode": "^1.1.37"
-	},
-	"dependencies": {
-		"tmp": "^0.2.3",
-		"ts-pattern": "^5.5.0",
-		"vscode-uri": "^3.0.8"
-	}
+  "name": "raven-verifier",
+  "displayName": "Raven Verifier",
+  "description": "VSCode integration of the Raven language and verifier.",
+  "icon": "images/logo.png",
+  "version": "1.1.0",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "publisher": "nyu-acsys",
+  "license": "See LICENSE file",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nyu-acsys/raven-lang.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nyu-acsys/raven-lang/issues"
+  },
+  "keywords": [
+    "raven IVL",
+    "verification",
+    "formal methods",
+    "program verification",
+    "language server",
+    "ivl",
+    "verifier",
+    "verification language",
+    "intermediate verification language"
+  ],
+  "main": "./client/out/extension",
+  "activationEvents": [
+    "onLanguage:raven"
+  ],
+  "contributes": {
+    "configuration": {
+      "type": "object",
+      "title": "Raven configuration",
+      "properties": {
+        "ravenServer.maxNumberOfProblems": {
+          "scope": "resource",
+          "type": "number",
+          "default": 100,
+          "description": "Controls the maximum number of problems produced by the server."
+        },
+        "ravenServer.trace.server": {
+          "scope": "window",
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Traces the communication between VS Code and the language server."
+        },
+        "ravenServer.executablePath": {
+          "scope": "resource",
+          "type": "string",
+          "default": "",
+          "description": "Path to the Raven executable. Leave empty to use the verifier bundled with this extension; set this to point at a different build (e.g. a local dev build) instead."
+        },
+        "ravenServer.highlightRelatedLocations": {
+          "scope": "resource",
+          "type": "boolean",
+          "default": true,
+          "description": "Underline a diagnostic's related locations in the editor (in the Information colour, rather than the error's red) when they fall in the file being edited. They remain listed under the diagnostic in the Problems panel either way."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "raven.verify",
+        "title": "Raven: Verify File",
+        "category": "Raven"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "raven.verify",
+        "key": "shift+alt+r",
+        "mac": "shift+cmd+r",
+        "when": "editorTextFocus && resourceLangId == raven"
+      }
+    ],
+    "languages": [
+      {
+        "id": "raven",
+        "aliases": [
+          "Raven",
+          "raven"
+        ],
+        "extensions": [
+          ".rav"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "raven",
+        "scopeName": "source.raven",
+        "path": "./syntaxes/raven.tmLanguage.json"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -b",
+    "watch": "tsc -b -w",
+    "lint": "eslint",
+    "postinstall": "cd client && npm install && cd ../server && npm install && cd ..",
+    "test": "sh ./scripts/e2e.sh"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.13.0",
+    "@stylistic/eslint-plugin": "^2.9.0",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20",
+    "@types/tmp": "^0.2.6",
+    "eslint": "^9.13.0",
+    "mocha": "^10.3.0",
+    "typescript": "^5.6.2",
+    "typescript-eslint": "^8.11.0",
+    "vscode": "^1.1.37"
+  },
+  "dependencies": {
+    "tmp": "^0.2.3",
+    "ts-pattern": "^5.5.0",
+    "vscode-uri": "^3.0.8"
+  }
 }

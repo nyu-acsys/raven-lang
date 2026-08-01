@@ -4,6 +4,7 @@
  * ------------------------------------------------------------------------------------------ */
 
 import * as path from 'path';
+import * as fs from 'fs';
 import { execFile } from 'child_process';
 import { workspace, ExtensionContext } from 'vscode';
 import * as vscode from 'vscode';
@@ -51,6 +52,50 @@ function updateStatusBar(editor: vscode.TextEditor | undefined) {
 	}
 }
 
+// Scheme for Raven's own library sources. Those are embedded in the verifier rather
+// than being files on disk, so a diagnostic pointing into one has nothing to open. The
+// provider below serves their text straight from the binary that produced the
+// diagnostic, so what you read is always what was actually verified.
+//
+// Serving them under a scheme of their own, rather than writing copies somewhere and
+// opening those as files, buys two things for free. A document backed by a content
+// provider is read-only, so no editable copy can drift from what the verifier uses. And
+// the language client's documentSelector matches `scheme: 'file'` only, so these are
+// never sent to the server and never verified -- which matters, because a library
+// source does not check on its own: they are verified as a set, each referring to
+// declarations in the others. Syntax highlighting is unaffected, since that follows the
+// `.rav` extension in the path rather than the scheme.
+export const LIBRARY_SCHEME = 'raven-stdlib';
+
+function ravenExecutable(bundledBinDir: string): string {
+	const configured = workspace.getConfiguration('ravenServer').get<string>('executablePath');
+	if (configured) {
+		return configured;
+	}
+	const bundled = path.join(bundledBinDir, process.platform === 'win32' ? 'raven.exe' : 'raven');
+	return fs.existsSync(bundled) ? bundled : 'raven';
+}
+
+class LibrarySourceProvider implements vscode.TextDocumentContentProvider {
+	constructor(private readonly bundledBinDir: string) { }
+
+	provideTextDocumentContent(uri: vscode.Uri): Thenable<string> {
+		// The path carries the source's name exactly as the verifier reports it, e.g.
+		// `lib/library/resource_algebra.rav`.
+		const name = uri.path.replace(/^\/+/, '');
+		return new Promise<string>((resolve) => {
+			execFile(
+				ravenExecutable(this.bundledBinDir),
+				['--shh', '--print-library-source', name],
+				(err, stdout) => {
+					resolve(err
+						? `// Could not load the Raven library source '${name}'.\n// ${err.message}`
+						: stdout);
+				});
+		});
+	}
+}
+
 export function activate(context: ExtensionContext) {
 	// The server is implemented in node
 	const serverModule = context.asAbsolutePath(
@@ -60,6 +105,10 @@ export function activate(context: ExtensionContext) {
 	// Populated only in platform-specific packages that bundle raven/z3;
 	// absent (and harmless) when running from source or an unbundled build.
 	const bundledBinDir = context.asAbsolutePath(path.join('bundled', 'bin'));
+
+	context.subscriptions.push(
+		vscode.workspace.registerTextDocumentContentProvider(
+			LIBRARY_SCHEME, new LibrarySourceProvider(bundledBinDir)));
 
 	if (process.platform === 'darwin') {
 		// Marketplace downloads land with com.apple.quarantine set, which makes

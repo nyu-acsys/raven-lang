@@ -102,13 +102,18 @@ connection.onInitialized(() => {
 });
 
 // The settings
+// Must match LIBRARY_SCHEME in the client. Declared separately rather than imported
+// because client and server are built as independent packages.
+const LIBRARY_SCHEME = 'raven-stdlib';
+
 interface ServerSettings {
 	maxNumberOfProblems: number;
 	executablePath: string;
+	highlightRelatedLocations: boolean;
 }
 
 // The global settings, used when the `workspace/configuration` request is not supported by the client.
-const defaultSettings: ServerSettings = { maxNumberOfProblems: 1000, executablePath: '' };
+const defaultSettings: ServerSettings = { maxNumberOfProblems: 1000, executablePath: '', highlightRelatedLocations: true };
 let globalSettings: ServerSettings = defaultSettings;
 
 // Cache the settings of all open documents
@@ -240,17 +245,29 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 			}
 		}
 
-		const errors: { kind: string, file: string, message: string[], start_line: number, start_col: number, end_line: number, end_col: number }[] =
+		const errors: { kind: string, file: string, message: string[], start_line: number, start_col: number, end_line: number, end_col: number, library?: boolean, path?: string }[] =
 			parse(stdout);
 
 		// Raven reports every location in whatever file it is really in: the temporary
-		// copy of this document, or a file reached through `include`. Only the temp copy
-		// needs rewriting -- everything else is a real path already, and passing it
-		// through is what makes a related location clickable rather than silently
-		// redirected at the file being edited.
+		// copy of this document, a file reached through `include`, or one of its own
+		// embedded library sources. Only the temp copy needs rewriting -- everything else
+		// is a real location already, and passing it through is what makes a related
+		// location clickable rather than silently redirected at the file being edited.
+		//
+		// A library source is flagged `library` and named by its path within the Raven
+		// repository. It carries `path` as well when the verifier is running inside a
+		// checkout whose copy of that file matches the embedded one byte for byte -- the
+		// real source, worth opening and editing. Otherwise there is no file to open and
+		// we fall back to the read-only virtual document (see LIBRARY_SCHEME in the
+		// client), which serves the text from the verifier itself.
 		const tmpfileResolved = path.resolve(tmpfile.name);
-		const uriForFile = function (file: string): string {
-			const resolved = path.resolve(dir, file);
+		const uriForError = function (e: { file: string, library?: boolean, path?: string }): string {
+			if (e.library) {
+				return e.path
+					? URI.file(e.path).toString()
+					: URI.from({ scheme: LIBRARY_SCHEME, path: `/${e.file}` }).toString();
+			}
+			const resolved = path.resolve(dir, e.file);
 			return resolved === tmpfileResolved ? textDocument.uri : URI.file(resolved).toString();
 		};
 
@@ -267,6 +284,11 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 		// outright (`diagnostics.pop()` on an empty array), so buffer them and attach
 		// them to the next diagnostic instead.
 		let pendingRelated: DiagnosticRelatedInformation[] = [];
+
+		// Underlines for related locations that fall inside this document, collected
+		// separately so they are appended after the errors they explain.
+		const highlightRelated = settings.highlightRelatedLocations !== false;
+		const relatedHighlights: Diagnostic[] = [];
 
 		// Convert errors into diagnostic reports
 		for (const err of errors) {
@@ -285,8 +307,9 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 
 			if (err.kind == "RelatedLoc") {
 				if (hasDiagnosticRelatedInformationCapability) {
+					const uri = uriForError(err);
 					const related: DiagnosticRelatedInformation = {
-						location: { uri: uriForFile(err.file), range: rangeOf(err) },
+						location: { uri, range: rangeOf(err) },
 						message: `${msg}`
 					};
 					const previous = diagnostics[diagnostics.length - 1];
@@ -294,6 +317,21 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 						previous.relatedInformation = [...(previous.relatedInformation ?? []), related];
 					} else {
 						pendingRelated.push(related);
+					}
+					// Related information alone is only visible on hover or in the Problems
+					// panel. Emitting the location as a diagnostic in its own right also
+					// underlines it in the editor -- Information severity, so it is blue
+					// rather than the red of the failure it explains. Only for locations in
+					// this document: a diagnostic is displayed in the document it is
+					// reported against, so one belonging to another file has to stay
+					// related information.
+					if (highlightRelated && uri === textDocument.uri) {
+						relatedHighlights.push({
+							severity: DiagnosticSeverity.Information,
+							range: rangeOf(err),
+							message: `[Related Location] ${msg}`,
+							source: 'raven'
+						});
 					}
 				}
 			} else {
@@ -310,6 +348,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 				diagnostics.push(diagnostic);
 			}
 		}
+
+		diagnostics.push(...relatedHighlights);
 	} catch (error: any) {
 		connection.console.error(`Error executing Raven: ${error.message}`);
 		// Optionally report a diagnostic if Raven fails to run
