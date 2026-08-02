@@ -92,12 +92,17 @@ jobs:
           chmod +x bundled/bin/z3${{ matrix.bin_ext }}
           rm -rf z3.zip z3-extracted
 
+      # `--out` names a directory, not a file, so vsce chooses the filename itself:
+      # `<name>-<target>-<version>.vsix`, e.g. raven-verifier-linux-x64-1.1.0.vsix. That
+      # matches the extension's own identity (`nyu-acsys.raven-verifier`) and carries the
+      # version, so packages from different releases no longer collide -- and it stays
+      # right on its own if the name or version changes.
       - name: Package vsix
-        run: npx @vscode/vsce package --target ${{ matrix.vsce_target }} --out raven-ivl-${{ matrix.vsce_target }}.vsix --readme-path MARKETPLACE.md
+        run: npx @vscode/vsce package --target ${{ matrix.vsce_target }} --out dist/ --readme-path MARKETPLACE.md
 
       - name: Upload vsix
         uses: actions/upload-artifact@v4
         with:
-          name: raven-ivl-${{ matrix.vsce_target }}
-          path: raven-ivl-${{ matrix.vsce_target }}.vsix
+          name: raven-verifier-${{ matrix.vsce_target }}
+          path: dist/*.vsix
           if-no-files-found: error
