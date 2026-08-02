@@ -110,3 +110,25 @@ jobs:
           name: raven-verifier-${{ matrix.vsce_target }}
           path: dist/*.vsix
           if-no-files-found: error
+
+  # Attaches the packaged extensions to the GitHub release for the tag. Actions
+  # artifacts expire (90 days) and can only be fetched by someone authenticated, so
+  # they are no use for handing anyone a .vsix; release assets are permanent and
+  # public. Skipped for `workflow_dispatch`, which has no tag to release against.
+  release:
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all packages
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Attach packages to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*/*.vsix
+          fail_on_unmatched_files: true
