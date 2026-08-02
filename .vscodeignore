@@ -2,6 +2,11 @@
 .vscode-test/**
 .gitignore
 vsc-extension-quickstart.md
+# The packaged listing comes from MARKETPLACE.md, which vsce installs as readme.md
+# (see --readme-path in .github/workflows/package.yml). README.md is the GitHub-facing
+# developer doc; shipping both collides, because the VSIX format treats readme.md and
+# README.md as the same path.
+README.md
 .eslintrc.json
 tsconfig.json
 **/*.ts
