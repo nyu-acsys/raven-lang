@@ -97,8 +97,12 @@ jobs:
       # matches the extension's own identity (`nyu-acsys.raven-verifier`) and carries the
       # version, so packages from different releases no longer collide -- and it stays
       # right on its own if the name or version changes.
+      # vsce stats the output directory rather than creating it, so it has to exist.
       - name: Package vsix
-        run: npx @vscode/vsce package --target ${{ matrix.vsce_target }} --out dist/ --readme-path MARKETPLACE.md
+        shell: bash
+        run: |
+          mkdir -p dist
+          npx @vscode/vsce package --target ${{ matrix.vsce_target }} --out dist/ --readme-path MARKETPLACE.md
 
       - name: Upload vsix
         uses: actions/upload-artifact@v4
