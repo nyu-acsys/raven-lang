@@ -7,6 +7,8 @@
 
 VS Code integration for the [Raven intermediate verification language](https://github.com/nyu-acsys/raven) and verification tool. This is the extension's source — for installation and day-to-day usage, see the [Marketplace listing](https://marketplace.visualstudio.com/items?itemName=nyu-acsys.raven-verifier); the docs below cover building and developing the extension itself.
 
+New to Raven itself? Start at **[nyu-acsys.github.io/raven](https://nyu-acsys.github.io/raven/)** — the project page and an introduction to the language, including a [hands-on tutorial](https://nyu-acsys.github.io/raven/tutorial/) written around this extension.
+
 </td>
 </tr>
 </table>
