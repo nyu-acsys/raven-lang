@@ -87,15 +87,25 @@ cat > ~/.local/share/mime/packages/raven.xml <<'EOF'
 </mime-info>
 EOF
 update-mime-database ~/.local/share/mime
+```
+
+With the type defined, either right-click a `.rav` file in your file manager and set
+Visual Studio Code as the default application, or do it from the terminal:
+
+```bash
 xdg-mime default code.desktop text/x-raven
 ```
 
-`code.desktop` is the name the official `.deb`/`.rpm` packages install. Other builds
-differ — `code-insiders.desktop`, `codium.desktop`, `code_code.desktop` (Snap),
-`com.visualstudio.code.desktop` (Flatpak) — so check yours first:
+The name to use there depends on how VS Code was installed: `code.desktop` for the
+official `.deb`/`.rpm`, `code_code.desktop` for the Snap, `com.visualstudio.code.desktop`
+for the Flatpak, `code-insiders.desktop` or `codium.desktop` for those builds. Snap and
+Flatpak keep their desktop files outside `/usr/share/applications`, so look everywhere
+XDG does rather than in one directory:
 
 ```bash
-ls /usr/share/applications ~/.local/share/applications | grep -i code
+for dir in "${XDG_DATA_HOME:-$HOME/.local/share}" ${XDG_DATA_DIRS//:/ }; do
+    ls "$dir/applications" 2>/dev/null
+done | grep -i code | sort -u
 ```
 
 Then confirm it took, and restart your file manager if it is still showing the old
