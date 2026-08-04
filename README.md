@@ -57,6 +57,83 @@ This extension provides the following settings:
 * `ravenServer.showGutterIcons`: Mark lines carrying a diagnostic with an icon in the editor's gutter.
 * `ravenServer.highlightRelatedLocations`: Underline a diagnostic's related locations in the editor.
 
+## Opening `.rav` files from the file manager
+
+Installing this extension teaches VS Code what a `.rav` file is; it does not tell the
+operating system, so double-clicking one in Explorer/Finder/Nautilus won't open VS Code
+until you say so once. That step can't be automated from here: a VSIX has no install
+hook, and there is no contribution point for OS file association — that belongs to the
+VS Code installer, which registers a fixed list of extensions that `.rav` isn't on.
+
+Doing it by hand is a one-time job.
+
+### Windows
+
+Right-click any `.rav` file → **Open with** → **Choose another app** → pick Visual Studio
+Code → tick **Always use this app to open .rav files**.
+
+Equivalently, in PowerShell. This writes under `HKCU`, so there is no administrator
+prompt; adjust the path if VS Code is installed system-wide, where it lives under
+`C:\Program Files\Microsoft VS Code`:
+
+```powershell
+$code = "$env:LOCALAPPDATA\Programs\Microsoft VS Code\Code.exe"
+New-Item 'HKCU:\Software\Classes\.rav' -Force -Value 'VSCode.rav' | Out-Null
+New-Item 'HKCU:\Software\Classes\VSCode.rav' -Force -Value 'Raven source file' | Out-Null
+New-Item 'HKCU:\Software\Classes\VSCode.rav\shell\open\command' -Force `
+    -Value "`"$code`" `"%1`"" | Out-Null
+```
+
+### macOS
+
+Select a `.rav` file in Finder → **File ▸ Get Info** (`Cmd+I`) → under **Open with:**
+choose Visual Studio Code → click **Change All…**.
+
+If VS Code isn't in the dropdown, pick **Other…**, set the **Enable:** filter to *All
+Applications*, and select it from `/Applications`.
+
+### Linux
+
+`.rav` is not a MIME type any distribution knows, so it needs defining first — otherwise
+the only type a file manager can offer to reassign is `text/plain`, and changing that
+would redirect every plain-text file to VS Code.
+
+```bash
+mkdir -p ~/.local/share/mime/packages
+cat > ~/.local/share/mime/packages/raven.xml <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="text/x-raven">
+    <comment>Raven source file</comment>
+    <sub-class-of type="text/plain"/>
+    <glob pattern="*.rav"/>
+  </mime-type>
+</mime-info>
+EOF
+update-mime-database ~/.local/share/mime
+xdg-mime default code.desktop text/x-raven
+```
+
+`code.desktop` is the name the official `.deb`/`.rpm` packages install. Other builds
+differ — `code-insiders.desktop`, `codium.desktop`, `code_code.desktop` (Snap),
+`com.visualstudio.code.desktop` (Flatpak) — so check yours first:
+
+```bash
+ls /usr/share/applications ~/.local/share/applications | grep -i code
+```
+
+Then confirm it took, and restart your file manager if it is still showing the old
+association:
+
+```bash
+xdg-mime query filetype some-file.rav   # text/x-raven
+xdg-mime query default text/x-raven     # code.desktop
+```
+
+Check the first one against a file with something in it. Content sniffing outranks the
+glob for empty files, so a `.rav` you just created with `touch` reports as
+`application/x-zerosize` even when everything is set up correctly.
+
 ## Building from Source
 
 To develop or build the extension locally:
