@@ -90,6 +90,12 @@
           "default": true,
           "description": "Check once a day whether a newer Raven verifier has been released, and offer to install it. Nothing is downloaded without asking. Use the 'Raven: Update Verifier' command to check on demand."
         },
+        "ravenServer.showGutterIcons": {
+          "scope": "resource",
+          "type": "boolean",
+          "default": true,
+          "description": "Mark lines carrying a diagnostic with an icon in the editor's gutter: an error icon for failures, an information icon for related locations. Hovering an icon shows the messages on that line. Requires the glyph margin to be visible ('editor.glyphMargin')."
+        },
         "ravenServer.highlightRelatedLocations": {
           "scope": "resource",
           "type": "boolean",
@@ -155,7 +161,7 @@
     "watch": "tsc -b -w",
     "lint": "eslint",
     "postinstall": "cd client && npm install && cd ../server && npm install && cd ..",
-    "test": "npm run compile && node test/updater.js"
+    "test": "npm run compile && node test/client.js"
   },
   "devDependencies": {
     "@eslint/js": "^9.13.0",

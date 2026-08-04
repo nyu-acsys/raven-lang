@@ -1,6 +1,7 @@
 /*
- * Checks for the verifier updater -- the code that lets the extension install a Raven it
- * was not shipped with (client/src/ravenBinary.ts, client/src/ravenUpdate.ts).
+ * Checks for the extension's client-side logic: choosing and installing a verifier
+ * (client/src/ravenBinary.ts, client/src/ravenUpdate.ts) and deciding which lines get a
+ * gutter marker (client/src/gutter.ts).
  *
  * Run with `npm test`, which compiles first: this exercises the built output in
  * client/out, which is what actually ships.
@@ -33,7 +34,9 @@ const vscodeStub = {
 		getConfiguration: () => ({
 			get: (key, fallback) => (key in settings ? settings[key] : fallback)
 		})
-	}
+	},
+	// The real numeric values, so the severity comparisons under test are the real ones.
+	DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 }
 };
 
 const originalLoad = Module._load;
@@ -43,6 +46,7 @@ Module._load = function (request, parent, isMain) {
 
 const binary = require(path.join(OUT, 'ravenBinary.js'));
 const update = require(path.join(OUT, 'ravenUpdate.js'));
+const gutter = require(path.join(OUT, 'gutter.js'));
 
 // --- harness --------------------------------------------------------------------------
 
@@ -166,6 +170,61 @@ async function pureChecks() {
 	await check('does not judge z3 when there is no bundled z3', () => {
 		assert.strictEqual(update.incompatibilityReason(
 			{ version: '9.0.0', lsp_protocol: 1, min_z3: '9.9.9' }, undefined), undefined);
+	});
+}
+
+// --- gutter markers -------------------------------------------------------------------
+
+const ERROR = vscodeStub.DiagnosticSeverity.Error;
+const INFO = vscodeStub.DiagnosticSeverity.Information;
+const WARNING = vscodeStub.DiagnosticSeverity.Warning;
+
+function diagnostic(line, severity, message, source = 'raven') {
+	return { range: { start: { line }, end: { line, character: 10 } }, severity, message, source };
+}
+
+async function gutterChecks() {
+	console.log('gutter markers');
+	await check('marks failures and related locations separately', () => {
+		const { errors, related } = gutter.gutterMarkers([
+			diagnostic(4, ERROR, '[Verification Error] A postcondition may not hold'),
+			diagnostic(9, INFO, '[Related Location] This assertion may not hold')
+		]);
+		assert.deepStrictEqual([...errors.keys()], [4]);
+		assert.deepStrictEqual([...related.keys()], [9]);
+	});
+	await check('collects every message reported against a line', () => {
+		const { errors } = gutter.gutterMarkers([
+			diagnostic(4, ERROR, 'first'),
+			diagnostic(4, ERROR, 'second')
+		]);
+		assert.deepStrictEqual(errors.get(4), ['first', 'second']);
+	});
+	await check('a failure outranks a related location on the same line', () => {
+		const { errors, related } = gutter.gutterMarkers([
+			diagnostic(4, INFO, '[Related Location] ...'),
+			diagnostic(4, ERROR, '[Verification Error] ...')
+		]);
+		assert.deepStrictEqual([...errors.keys()], [4]);
+		assert.strictEqual(related.size, 0, 'the line should not be marked twice');
+	});
+	await check('marks only the line a multi-line diagnostic starts at', () => {
+		const spanning = {
+			range: { start: { line: 2 }, end: { line: 40 } },
+			severity: ERROR, message: 'x', source: 'raven'
+		};
+		assert.deepStrictEqual([...gutter.gutterMarkers([spanning]).errors.keys()], [2]);
+	});
+	await check('ignores other extensions\' diagnostics', () => {
+		const { errors, related } = gutter.gutterMarkers([diagnostic(4, ERROR, 'x', 'eslint')]);
+		assert.strictEqual(errors.size + related.size, 0);
+	});
+	await check('ignores the warning reported when the verifier cannot run', () => {
+		// Pinned to line 1 and describing the whole run rather than that line.
+		const { errors, related } = gutter.gutterMarkers([
+			diagnostic(0, WARNING, 'Failed to execute the Raven verifier at ...')
+		]);
+		assert.strictEqual(errors.size + related.size, 0);
 	});
 }
 
@@ -295,6 +354,7 @@ async function main() {
 	const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'raven-updater-test-'));
 	try {
 		await pureChecks();
+		await gutterChecks();
 		// The fixture server presents a certificate no store knows about.
 		process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 		await installChecks(scratch);

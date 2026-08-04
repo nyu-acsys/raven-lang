@@ -31,6 +31,7 @@ import {
 	updateChannel
 } from './ravenBinary';
 import { Release, fetchRelease, incompatibilityReason, installRelease, isNewer } from './ravenUpdate';
+import { LineMessages, gutterMarkers } from './gutter';
 
 let client: LanguageClient;
 let verificationSucceededStatusBarItem: vscode.StatusBarItem;
@@ -116,6 +117,74 @@ class LibrarySourceProvider implements vscode.TextDocumentContentProvider {
 						: stdout);
 				});
 		});
+	}
+}
+
+/* --- Gutter markers -------------------------------------------------------------------
+ *
+ * VS Code puts nothing in the gutter for diagnostics: an error is a squiggle plus a tick
+ * on the overview ruler, both of which need the offending line to be on screen (or the
+ * Problems panel to be open) to be noticed. A marker in the glyph margin makes a file
+ * scannable -- and it matters most for related locations, whose blue underline is
+ * deliberately quiet and easy to miss.
+ *
+ * The icon has to be an image, and VS Code does not tint one with a ThemeColor, so the
+ * colour is baked in and picked per theme kind. The values are VS Code's own defaults for
+ * `editorError.foreground` and `editorInfo.foreground`, which is what draws the squiggles
+ * these mark.
+ */
+
+let errorGutter: vscode.TextEditorDecorationType;
+let relatedGutter: vscode.TextEditorDecorationType;
+
+function createGutterDecorations(context: ExtensionContext): void {
+	const iconPath = (name: string) =>
+		vscode.Uri.file(context.asAbsolutePath(path.join('images', 'gutter', `${name}.svg`)));
+	const decoration = (name: string) => vscode.window.createTextEditorDecorationType({
+		light: { gutterIconPath: iconPath(`${name}-light`) },
+		dark: { gutterIconPath: iconPath(`${name}-dark`) },
+		gutterIconSize: 'contain'
+	});
+	errorGutter = decoration('error');
+	relatedGutter = decoration('related');
+	context.subscriptions.push(errorGutter, relatedGutter);
+}
+
+function showGutterIcons(resource: vscode.Uri): boolean {
+	return workspace.getConfiguration('ravenServer', resource).get<boolean>('showGutterIcons', true);
+}
+
+/**
+ * Put a marker on every line a Raven diagnostic starts at. Only the starting line: a
+ * diagnostic spanning a whole procedure body would otherwise stripe the gutter down its
+ * entire length, which says nothing a single marker does not.
+ */
+function refreshGutterIcons(editor: vscode.TextEditor): void {
+	if (editor.document.languageId !== 'raven') return;
+
+	if (!showGutterIcons(editor.document.uri)) {
+		editor.setDecorations(errorGutter, []);
+		editor.setDecorations(relatedGutter, []);
+		return;
+	}
+
+	// Several diagnostics regularly share a line, so a marker's hover carries all of
+	// their messages -- the quickest way to read a related location without hunting for
+	// the underlined span it belongs to.
+	const { errors, related } = gutterMarkers(vscode.languages.getDiagnostics(editor.document.uri));
+	const decorationsFor = (lines: LineMessages) =>
+		[...lines.entries()].map(([line, messages]) => ({
+			range: new vscode.Range(line, 0, line, 0),
+			hoverMessage: new vscode.MarkdownString(messages.join('\n\n'))
+		}));
+
+	editor.setDecorations(errorGutter, decorationsFor(errors));
+	editor.setDecorations(relatedGutter, decorationsFor(related));
+}
+
+function refreshAllGutterIcons(): void {
+	for (const editor of vscode.window.visibleTextEditors) {
+		refreshGutterIcons(editor);
 	}
 }
 
@@ -332,6 +401,13 @@ export function activate(context: ExtensionContext) {
 	context.subscriptions.push(
 		vscode.workspace.registerTextDocumentContentProvider(LIBRARY_SCHEME, librarySources));
 
+	createGutterDecorations(context);
+	// Decorations belong to an editor rather than to a document, so they have to be
+	// reapplied whenever an editor appears -- opening a file, splitting, or coming back
+	// to a tab that was closed.
+	context.subscriptions.push(
+		vscode.window.onDidChangeVisibleTextEditors(editors => editors.forEach(refreshGutterIcons)));
+
 	if (process.platform === 'darwin') {
 		// Marketplace downloads land with com.apple.quarantine set, which makes
 		// Gatekeeper refuse to run the unsigned bundled binaries. Best-effort
@@ -430,6 +506,11 @@ export function activate(context: ExtensionContext) {
 
 	// Show/hide the badge based on diagnostics
 	vscode.languages.onDidChangeDiagnostics((e) => {
+		const changed = new Set(e.uris.map(uri => uri.toString()));
+		for (const visible of vscode.window.visibleTextEditors) {
+			if (changed.has(visible.document.uri.toString())) refreshGutterIcons(visible);
+		}
+
 		const editor = getActiveRavenEditor();
 		if (editor && e.uris.some(uri => uri.toString() === editor.document.uri.toString())) {
 			// If diagnostics changed for the current file, update.
@@ -489,7 +570,14 @@ export function activate(context: ExtensionContext) {
 			|| event.affectsConfiguration('ravenServer.ravenVersion')) {
 			refreshBinary(context);
 		}
+		if (event.affectsConfiguration('ravenServer.showGutterIcons')) {
+			refreshAllGutterIcons();
+		}
 	}));
+
+	// Diagnostics for a file already open at startup have usually arrived before the
+	// listeners above are in place.
+	refreshAllGutterIcons();
 }
 
 export function deactivate(): Thenable<void> | undefined {
