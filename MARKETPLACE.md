@@ -30,6 +30,12 @@ code --install-extension nyu-acsys.raven-verifier
 * **Verification**: Verification runs automatically as you edit — no need to save first.
 * **Manual Verification**: You can trigger verification manually by pressing `Cmd+Shift+R` (Mac) or `Alt+Shift+R` (Windows/Linux) when editing a `.rav` file.
 
+## Staying up to date
+
+The extension ships with a working verifier, and also keeps up with new Raven releases on its own, so you get a new verifier without waiting for a new extension. It checks at most once a day and asks before downloading anything; `Raven: Show Verifier Version` says what is currently in use.
+
+To turn this off, set `ravenServer.updateChannel` to `bundled` (or run `Raven: Use Bundled Verifier`). To pin a particular Raven release, set the channel to `tag` and name it in `ravenServer.ravenVersion`.
+
 ## Learning Raven
 
 The [**Raven Tutorial**](https://nyu-acsys.github.io/raven/tutorial/) is a from-scratch introduction written around this extension: [Part 0](https://nyu-acsys.github.io/raven/tutorial/00-getting-started/) starts from the extension you have just installed and a first `.rav` file, and a single running example grows from a plain value into a concurrent data structure. Every listing in it is real, checked source.
@@ -40,7 +46,11 @@ This extension provides the following settings:
 
 * `ravenServer.maxNumberOfProblems`: Controls the maximum number of problems produced by the server.
 * `ravenServer.trace.server`: Traces the communication between VS Code and the language server.
-* `ravenServer.executablePath`: Path to the Raven executable. Leave empty to use the verifier bundled with the extension.
+* `ravenServer.executablePath`: Path to the Raven executable. Leave empty to let the extension choose one.
+* `ravenServer.updateChannel`: `stable` (follow Raven releases), `tag` (use the release named by `ravenServer.ravenVersion`), or `bundled` (only ever use the shipped verifier).
+* `ravenServer.ravenVersion`: The release tag to use on the `tag` channel, e.g. `v1.2.0`.
+* `ravenServer.checkForUpdates`: Whether to check daily for a newer verifier.
+* `ravenServer.highlightRelatedLocations`: Underline a diagnostic's related locations in the editor.
 
 ## Developing Raven or This Extension
 

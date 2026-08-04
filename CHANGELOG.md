@@ -5,6 +5,17 @@ All notable changes to the "raven" extension will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- The extension now keeps up with Raven releases on its own, so a new verifier no longer requires a new extension release. The bundled verifier becomes a floor rather than a pin: on startup, at most once a day, the extension checks whether a newer Raven has been released and offers to install it, keeping installed verifiers per version under its global storage. Nothing is downloaded without asking, and the bundled copy is still what makes a fresh, offline first run work. New settings `ravenServer.updateChannel` (`stable` by default, or `tag`/`bundled`), `ravenServer.ravenVersion` and `ravenServer.checkForUpdates`, and new commands `Raven: Update Verifier`, `Raven: Show Verifier Version` and `Raven: Use Bundled Verifier`. `ravenServer.executablePath` continues to override everything.
+- A release is only installed if this extension can actually drive it. Raven releases publish a `manifest.json` declaring an `lsp_protocol` — the version of the JSON diagnostic schema and CLI surface the extension talks to, versioned separately from Raven itself — and the oldest Z3 they work against. A release outside the supported protocol range, or needing a newer Z3 than the extension bundles, is declined with a message to update the extension, rather than installed and left to fail later. Downloads are checked against the release's `SHA256SUMS`, extracted into a staging directory, and moved into place only after the verifier has been shown to run; installs are per version, so nothing is written over a binary that may be executing.
+
+### Changed
+
+- The language server no longer decides which `raven` to run: the client resolves it and tells the server, at startup and again whenever the answer changes. That is what lets a newly installed verifier take effect without restarting anything, and it removes a fallback chain that existed in both halves of the extension and would now have drifted.
+
 ## [1.1.0] - 2026-08-01
 
 ### Added

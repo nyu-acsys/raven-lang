@@ -40,16 +40,34 @@ let hasConfigurationCapability = false;
 let hasWorkspaceFolderCapability = false;
 let hasDiagnosticRelatedInformationCapability = false;
 
-// Directory bundled alongside the extension containing platform-specific
-// `raven`/`z3` binaries. Set via initializationOptions by the client; empty
-// when running from source or an unbundled build (e.g. during development).
-let bundledBinDir = '';
+// Which verifier to run, and where to find the z3 it needs. Decided entirely by the
+// client -- see client/src/ravenBinary.ts -- because the answer now depends on which
+// verifiers the extension has installed, and can change while the server is running.
+// The server is told at initialization and again whenever it changes; it never works
+// this out for itself.
+interface RavenExecutable {
+	/** Absolute path, or the bare name `raven` to be found on PATH. */
+	executable: string;
+	/** Directory to prepend to PATH so Raven finds the bundled z3, if there is one. */
+	z3Dir?: string;
+}
+
+let ravenExecutable: RavenExecutable = { executable: 'raven' };
+
+connection.onNotification('raven/executable', (params: RavenExecutable) => {
+	ravenExecutable = params;
+	connection.console.log(`Raven executable set to ${params.executable}`);
+	// Diagnostics on screen were produced by the previous binary.
+	connection.languages.diagnostics.refresh();
+});
 
 connection.onInitialize((params: InitializeParams) => {
 	const capabilities = params.capabilities;
 
-	const initOptions = params.initializationOptions as { bundledBinDir?: string } | undefined;
-	bundledBinDir = initOptions?.bundledBinDir ?? '';
+	const initOptions = params.initializationOptions as { raven?: RavenExecutable } | undefined;
+	if (initOptions?.raven) {
+		ravenExecutable = initOptions.raven;
+	}
 
 	// Does the client support the `workspace/configuration` request?
 	// If not, we fall back using global settings.
@@ -108,12 +126,11 @@ const LIBRARY_SCHEME = 'raven-stdlib';
 
 interface ServerSettings {
 	maxNumberOfProblems: number;
-	executablePath: string;
 	highlightRelatedLocations: boolean;
 }
 
 // The global settings, used when the `workspace/configuration` request is not supported by the client.
-const defaultSettings: ServerSettings = { maxNumberOfProblems: 1000, executablePath: '', highlightRelatedLocations: true };
+const defaultSettings: ServerSettings = { maxNumberOfProblems: 1000, highlightRelatedLocations: true };
 let globalSettings: ServerSettings = defaultSettings;
 
 // Cache the settings of all open documents
@@ -208,18 +225,12 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 	// Call raven and delete tmp
 	const execFile = promisify(execCb);
 
-	// An explicit `ravenServer.executablePath` always wins (dev-build override).
-	// Otherwise fall back to the binary bundled with the extension, if any.
-	const bundledExecutable = bundledBinDir
-		? path.join(bundledBinDir, process.platform === 'win32' ? 'raven.exe' : 'raven')
-		: undefined;
-	const executable = settings.executablePath || bundledExecutable || 'raven';
+	const { executable, z3Dir } = ravenExecutable;
 
 	// Make the bundled z3 discoverable on PATH -- raven finds z3 via a PATH
-	// search when it spawns it, whether raven itself is the bundled binary or
-	// a locally-built dev copy.
-	const env = bundledBinDir
-		? { ...process.env, PATH: `${bundledBinDir}${path.delimiter}${process.env.PATH ?? ''}` }
+	// search when it spawns it, whichever raven is in use.
+	const env = z3Dir
+		? { ...process.env, PATH: `${z3Dir}${path.delimiter}${process.env.PATH ?? ''}` }
 		: process.env;
 
 	const diagnostics: Diagnostic[] = [];
@@ -359,7 +370,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 				start: { line: 0, character: 0 },
 				end: { line: 0, character: 0 }
 			},
-			message: `Failed to execute Raven verifier. Please check 'ravenServer.executablePath'. Error: ${error.message}`,
+			message: `Failed to execute the Raven verifier at '${executable}'. Error: ${error.message}`,
 			source: 'raven'
 		};
 		diagnostics.push(diagnostic);

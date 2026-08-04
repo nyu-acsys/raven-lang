@@ -60,7 +60,35 @@
           "scope": "resource",
           "type": "string",
           "default": "",
-          "description": "Path to the Raven executable. Leave empty to use the verifier bundled with this extension; set this to point at a different build (e.g. a local dev build) instead."
+          "description": "Path to the Raven executable. Leave empty to let the extension choose one; set this to point at a different build (e.g. a local dev build) instead. Overrides the update channel."
+        },
+        "ravenServer.updateChannel": {
+          "scope": "window",
+          "type": "string",
+          "enum": [
+            "stable",
+            "tag",
+            "bundled"
+          ],
+          "enumDescriptions": [
+            "Use the latest released Raven verifier, downloading it when one appears.",
+            "Use the specific Raven release named by 'ravenServer.ravenVersion'.",
+            "Use only the verifier bundled with this extension, and never download one."
+          ],
+          "default": "stable",
+          "description": "Which Raven verifier to run. The extension always ships a working verifier; on the 'stable' channel it can also install newer ones as they are released, so a new Raven release does not have to wait for a new extension release."
+        },
+        "ravenServer.ravenVersion": {
+          "scope": "window",
+          "type": "string",
+          "default": "",
+          "description": "The Raven release tag to use (e.g. 'v1.2.0') when 'ravenServer.updateChannel' is 'tag'. Ignored otherwise."
+        },
+        "ravenServer.checkForUpdates": {
+          "scope": "window",
+          "type": "boolean",
+          "default": true,
+          "description": "Check once a day whether a newer Raven verifier has been released, and offer to install it. Nothing is downloaded without asking. Use the 'Raven: Update Verifier' command to check on demand."
         },
         "ravenServer.highlightRelatedLocations": {
           "scope": "resource",
@@ -74,6 +102,21 @@
       {
         "command": "raven.verify",
         "title": "Raven: Verify File",
+        "category": "Raven"
+      },
+      {
+        "command": "raven.updateVerifier",
+        "title": "Raven: Update Verifier",
+        "category": "Raven"
+      },
+      {
+        "command": "raven.showVerifierVersion",
+        "title": "Raven: Show Verifier Version",
+        "category": "Raven"
+      },
+      {
+        "command": "raven.useBundledVerifier",
+        "title": "Raven: Use Bundled Verifier",
         "category": "Raven"
       }
     ],
@@ -112,7 +155,7 @@
     "watch": "tsc -b -w",
     "lint": "eslint",
     "postinstall": "cd client && npm install && cd ../server && npm install && cd ..",
-    "test": "sh ./scripts/e2e.sh"
+    "test": "npm run compile && node test/updater.js"
   },
   "devDependencies": {
     "@eslint/js": "^9.13.0",
