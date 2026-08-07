@@ -132,7 +132,7 @@ This extension provides the following settings:
 * `ravenServer.trace.server`: Traces the communication between VS Code and the language server.
 * `ravenServer.executablePath`: Path to the Raven executable. Leave empty to let the extension choose one.
 * `ravenServer.updateChannel`: `stable` (follow Raven releases), `tag` (use the release named by `ravenServer.ravenVersion`), or `bundled` (only ever use the shipped verifier).
-* `ravenServer.ravenVersion`: The release tag to use on the `tag` channel, e.g. `v1.2.0`.
+* `ravenServer.ravenVersion`: The release tag to use on the `tag` channel, e.g. `v1.3.0`.
 * `ravenServer.checkForUpdates`: Whether to check daily for a newer verifier.
 * `ravenServer.showGutterIcons`: Mark lines carrying a diagnostic with an icon in the editor's gutter.
 * `ravenServer.highlightRelatedLocations`: Underline a diagnostic's related locations in the editor.
