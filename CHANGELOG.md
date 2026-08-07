@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The language server no longer decides which `raven` to run: the client resolves it and tells the server, at startup and again whenever the answer changes. That is what lets a newly installed verifier take effect without restarting anything, and it removes a fallback chain that existed in both halves of the extension and would now have drifted.
+- Syntax highlighting: `choose`, `is`, `in`, `subseteq` now highlight as built-ins.
 
 ## [1.1.0] - 2026-08-01
 
