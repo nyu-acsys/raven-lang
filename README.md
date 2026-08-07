@@ -192,9 +192,9 @@ the placeholder `unreleased`.
    already out.
 
 2. **Point this repo at it, and bump the extension's own version.** These are independent
-   version numbers — the extension's `1.1.0` bundles Raven's `1.2.0`.
+   version numbers — the extension's `1.2.0` bundles Raven's `1.3.0`.
 
-   - [`RAVEN_VERSION`](RAVEN_VERSION) — the Raven release *tag*, `v`-prefixed (`v1.2.0`).
+   - [`RAVEN_VERSION`](RAVEN_VERSION) — the Raven release *tag*, `v`-prefixed (`v1.3.0`).
      Only the bundled verifier, i.e. the version a fresh offline install gets. Users on
      the `stable` channel may already be running something newer.
    - [`Z3_VERSION`](Z3_VERSION) — only if the bundled Z3 is changing.
