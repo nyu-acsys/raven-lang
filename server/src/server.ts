@@ -50,6 +50,13 @@ interface RavenExecutable {
 	executable: string;
 	/** Directory to prepend to PATH so Raven finds the bundled z3, if there is one. */
 	z3Dir?: string;
+	/**
+	 * `lsp_protocol` from this executable's `--manifest`, once the client has read it
+	 * (see `pushExecutable` in extension.ts). Absent until that arrives, and forever for
+	 * a raven too old to answer `--manifest` at all -- both cases must be treated as "do
+	 * not rely on anything past protocol 1", the same as an explicit 1.
+	 */
+	lspProtocol?: number;
 }
 
 let ravenExecutable: RavenExecutable = { executable: 'raven' };
@@ -225,7 +232,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 	// Call raven and delete tmp
 	const execFile = promisify(execCb);
 
-	const { executable, z3Dir } = ravenExecutable;
+	const { executable, z3Dir, lspProtocol } = ravenExecutable;
 
 	// Make the bundled z3 discoverable on PATH -- raven finds z3 via a PATH
 	// search when it spawns it, whichever raven is in use.
@@ -233,11 +240,18 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 		? { ...process.env, PATH: `${z3Dir}${path.delimiter}${process.env.PATH ?? ''}` }
 		: process.env;
 
+	// `?? 0`: an unknown protocol (not yet reported, or too old to have one at all) must
+	// not get a flag that raven might reject outright -- same as the CLI's own default
+	// of `--extension default` when nothing auto-detects it.
+	const args = (lspProtocol ?? 0) >= 2
+		? ["--lsp-mode", "-q", "--extension", "auto", "--base-dir", dir, tmpfile.name]
+		: ["--lsp-mode", "-q", "--base-dir", dir, tmpfile.name];
+
 	const diagnostics: Diagnostic[] = [];
 
 	try {
-		// connection.console.log(`Executing: ${executable} --lsp-mode -q --base-dir ${dir} ${tmpfile.name}`);
-		const { stdout } = await execFile(executable, ["--lsp-mode", "-q", "--base-dir", dir, tmpfile.name], { cwd: dir, env });
+		// connection.console.log(`Executing: ${executable} ${args.join(" ")}`);
+		const { stdout } = await execFile(executable, args, { cwd: dir, env });
 
 		connection.console.log(`Raven response: ${stdout}`);
 

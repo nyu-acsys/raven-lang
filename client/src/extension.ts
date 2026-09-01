@@ -367,6 +367,24 @@ async function performUpdate(context: ExtensionContext, release: Release): Promi
 let librarySources: LibrarySourceProvider;
 
 /**
+ * Tells the server which verifier to run, including its `lsp_protocol` -- needed so the
+ * server can tell whether it is safe to pass a flag like `--extension auto` that not
+ * every raven understands (see `RavenExecutable.lspProtocol` in server.ts). Reading the
+ * manifest is a spawn, so this is async and callers fire it off without blocking on it;
+ * until it resolves (or for a raven too old to answer `--manifest`), the server treats
+ * the protocol as unknown and stays on the conservative, flag-free behavior.
+ */
+async function pushExecutable(binary: RavenBinary): Promise<void> {
+	if (!client?.isRunning()) return;
+	const manifest = await readManifest(binary);
+	await client.sendNotification('raven/executable', {
+		executable: binary.executable,
+		z3Dir: binary.z3Dir,
+		lspProtocol: manifest?.lsp_protocol
+	}).catch(() => { /* the server will get it at the next start */ });
+}
+
+/**
  * Re-resolve which verifier to use and tell the server. Cheap enough to call on any
  * event that could plausibly change the answer.
  */
@@ -376,12 +394,7 @@ function refreshBinary(context: ExtensionContext): void {
 	if (currentBinary.executable === previous) return;
 
 	librarySources?.invalidate();
-	if (client?.isRunning()) {
-		client.sendNotification('raven/executable', {
-			executable: currentBinary.executable,
-			z3Dir: currentBinary.z3Dir
-		}).catch(() => { /* the server will get it at the next start */ });
-	}
+	pushExecutable(currentBinary);
 	client?.outputChannel.appendLine(`Using Raven at ${currentBinary.executable} (${currentBinary.source})`);
 }
 
@@ -525,6 +538,12 @@ export function activate(context: ExtensionContext) {
 	client.start().then(() => {
 		// Initial update
 		updateStatusBar(getActiveRavenEditor());
+
+		// Deliberately not awaited: `initializationOptions` already told the server which
+		// executable to run, just not its `lsp_protocol` (reading the manifest needs a
+		// spawn, which would delay the point at which the extension becomes usable). This
+		// fills that in as soon as it's known, rather than waiting for the next binary change.
+		pushExecutable(currentBinary);
 
 		// Deliberately not awaited: a verifier update is never worth delaying the point
 		// at which the extension becomes usable, and the check may have to wait on the
