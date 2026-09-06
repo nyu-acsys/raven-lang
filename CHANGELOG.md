@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-09-06
+
 ### Fixed
 
 - A file using the eris extension no longer shows false errors from being checked as plain Raven: against a verifier reporting `lsp_protocol` 2 or newer, the extension now passes `--extension auto`, so the right mode is picked from the file's own syntax instead of assuming the default. Against an older verifier, nothing changes.

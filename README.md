@@ -52,7 +52,7 @@ This extension provides the following settings:
 * `ravenServer.trace.server`: Traces the communication between VS Code and the language server.
 * `ravenServer.executablePath`: Path to the Raven executable. Leave empty to let the extension choose one; overrides the update channel.
 * `ravenServer.updateChannel`: `stable` (follow Raven releases), `tag` (use the release named by `ravenServer.ravenVersion`), or `bundled` (only ever use the shipped verifier).
-* `ravenServer.ravenVersion`: The release tag to use on the `tag` channel, e.g. `v1.3.0`.
+* `ravenServer.ravenVersion`: The release tag to use on the `tag` channel, e.g. `v1.4.0`.
 * `ravenServer.checkForUpdates`: Whether to check daily for a newer verifier.
 * `ravenServer.showGutterIcons`: Mark lines carrying a diagnostic with an icon in the editor's gutter.
 * `ravenServer.highlightRelatedLocations`: Underline a diagnostic's related locations in the editor.
@@ -192,9 +192,9 @@ the placeholder `unreleased`.
    already out.
 
 2. **Point this repo at it, and bump the extension's own version.** These are independent
-   version numbers — the extension's `1.2.0` bundles Raven's `1.3.0`.
+   version numbers — the extension's `1.2.1` bundles Raven's `1.4.0`.
 
-   - [`RAVEN_VERSION`](RAVEN_VERSION) — the Raven release *tag*, `v`-prefixed (`v1.3.0`).
+   - [`RAVEN_VERSION`](RAVEN_VERSION) — the Raven release *tag*, `v`-prefixed (`v1.4.0`).
      Only the bundled verifier, i.e. the version a fresh offline install gets. Users on
      the `stable` channel may already be running something newer.
    - [`Z3_VERSION`](Z3_VERSION) — only if the bundled Z3 is changing.

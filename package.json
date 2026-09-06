@@ -3,7 +3,7 @@
   "displayName": "Raven Verifier",
   "description": "VSCode integration of the Raven language and verifier.",
   "icon": "images/logo.png",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "engines": {
     "vscode": "^1.95.0"
   },
@@ -82,7 +82,7 @@
           "scope": "window",
           "type": "string",
           "default": "",
-          "description": "The Raven release tag to use (e.g. 'v1.2.0') when 'ravenServer.updateChannel' is 'tag'. Ignored otherwise."
+          "description": "The Raven release tag to use (e.g. 'v1.4.0') when 'ravenServer.updateChannel' is 'tag'. Ignored otherwise."
         },
         "ravenServer.checkForUpdates": {
           "scope": "window",
