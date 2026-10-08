@@ -7,48 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `inline`, `opens` and `:>` are highlighted.
+
 ### Fixed
 
-- Opening a file checks it once rather than three times: the language server no longer starts another check when the client reports the verifier or the configuration right after startup, unless either actually changed.
+- Opening a file checks it once rather than three times.
 
 ## [1.2.1] - 2026-09-06
 
 ### Fixed
 
-- A file using the eris extension no longer shows false errors from being checked as plain Raven: against a verifier reporting `lsp_protocol` 2 or newer, the extension now passes `--extension auto`, so the right mode is picked from the file's own syntax instead of assuming the default. Against an older verifier, nothing changes.
+- Files using the eris extension are checked in the right mode instead of showing false errors, with a verifier reporting `lsp_protocol` 2 or newer.
 
 ## [1.2.0] - 2026-08-06
 
 ### Added
 
-- The extension now keeps up with Raven releases on its own, so a new verifier no longer requires a new extension release. The bundled verifier becomes a floor rather than a pin: on startup, at most once a day, the extension checks whether a newer Raven has been released and offers to install it, keeping installed verifiers per version under its global storage. Nothing is downloaded without asking, and the bundled copy is still what makes a fresh, offline first run work. New settings `ravenServer.updateChannel` (`stable` by default, or `tag`/`bundled`), `ravenServer.ravenVersion` and `ravenServer.checkForUpdates`, and new commands `Raven: Update Verifier`, `Raven: Show Verifier Version` and `Raven: Use Bundled Verifier`. `ravenServer.executablePath` continues to override everything.
-- A release is only installed if this extension can actually drive it. Raven releases publish a `manifest.json` declaring an `lsp_protocol` — the version of the JSON diagnostic schema and CLI surface the extension talks to, versioned separately from Raven itself — and the oldest Z3 they work against. A release outside the supported protocol range, or needing a newer Z3 than the extension bundles, is declined with a message to update the extension, rather than installed and left to fail later. Downloads are checked against the release's `SHA256SUMS`, extracted into a staging directory, and moved into place only after the verifier has been shown to run; installs are per version, so nothing is written over a binary that may be executing.
-
-- Gutter markers for diagnostics: a line carrying a failure gets an error icon in the editor's glyph margin, one carrying only related locations gets an information icon, in the same colours VS Code draws their squiggles. VS Code marks diagnostics with a squiggle and an overview-ruler tick, both of which need the line on screen (or the Problems panel open) to be noticed; a gutter marker makes a file scannable, which matters most for related locations, whose underline is deliberately quiet. Hovering a marker shows every message reported against that line. A line is marked where its diagnostic *starts*, so one spanning a whole procedure body gets a single marker rather than striping the gutter. Controlled by `ravenServer.showGutterIcons` (default on); needs `editor.glyphMargin` to be visible.
+- The extension keeps the verifier up to date: at most once a day, it checks for a newer Raven release and offers to install it. New settings `ravenServer.updateChannel`, `ravenServer.ravenVersion` and `ravenServer.checkForUpdates`, and new commands `Raven: Update Verifier`, `Raven: Show Verifier Version` and `Raven: Use Bundled Verifier`.
+- A Raven release is installed only if the extension supports its protocol version and has a recent enough Z3, and only after its download is checked against the release's checksums.
+- A line with errors or related locations is marked in the gutter, and hovering over the marker shows its messages. Controlled by `ravenServer.showGutterIcons`.
 
 ### Changed
 
-- The language server no longer decides which `raven` to run: the client resolves it and tells the server, at startup and again whenever the answer changes. That is what lets a newly installed verifier take effect without restarting anything, and it removes a fallback chain that existed in both halves of the extension and would now have drifted.
-- Syntax highlighting: `choose`, `is`, `in`, `subseteq` now highlight as built-ins.
+- A newly installed verifier takes effect without restarting the extension.
+- `choose`, `is`, `in` and `subseteq` are highlighted as built-ins.
 
 ## [1.1.0] - 2026-08-01
 
 ### Added
 
-- Bundled `raven` and `z3` binaries: platform-specific packages (Linux x64/arm64, macOS x64/arm64, Windows x64) no longer require installing the verifier or Z3 separately. `ravenServer.executablePath` still overrides the bundled binary (e.g. to test a local development build).
-- Manual verification trigger command: `Raven: Verify File` (`Cmd+Shift+R` / `Alt+Shift+R`).
-  - Includes immediate visual feedback ("Verifying..." spinner) when triggered.
-- Configuration setting `ravenServer.executablePath` to specify the path to the Raven binary.
-- Setting `ravenServer.highlightRelatedLocations` (default on): underlines a diagnostic's related locations in the editor in the Information colour, so they are visibly distinct from the red of the error they explain. Applies to related locations in the file being edited; they remain listed under the diagnostic in the Problems panel either way.
-- Robust URI handling using `vscode-uri` to ensure cross-platform compatibility (Windows/Linux/macOS).
-- Syntax highlighting support
-- Diagnostics via integration of the Raven verifier
+- Platform-specific packages bundle `raven` and `z3`, so neither has to be installed separately.
+- The command `Raven: Verify File` (`Cmd+Shift+R` / `Alt+Shift+R`) verifies the current file.
+- The setting `ravenServer.executablePath` selects the Raven binary to use, such as a local development build.
+- With `ravenServer.highlightRelatedLocations` (on by default), a diagnostic's related locations are underlined in the editor.
+- File paths are handled correctly on Windows, Linux and macOS.
+- Syntax highlighting, and diagnostics from the Raven verifier.
 
 ### Fixed
 
-- **Library Sources**: Related locations inside Raven's own standard library are now reachable. The library is embedded in the verifier rather than existing as files on disk, so these locations previously had nothing to open. They now open either the real source, when the verifier is running from a checkout that matches it, or a read-only virtual document (`raven-stdlib:` scheme) whose text comes straight from the verifier. The virtual document is syntax-highlighted like any `.rav` file and is never verified, which matters because a library source does not check on its own: they are verified as a set, each referring to declarations in the others.
-
-- **Related Locations**: A diagnostic's related locations now point at the file they are actually in, making them a clickable jump to the declaration that was violated (e.g. the interface axiom a module fails to satisfy, in the file that declares it). They were previously built with the URI of the file being edited regardless of where Raven reported them, so a location in an included file was rendered at those coordinates in the wrong file. Related locations reported *before* the diagnostic they explain — as Raven does for the declaration a rule was inherited from — were also dropped entirely, and now survive. Needs the paired verifier change ("Keep related locations intact in `--lsp-mode`"); against a verifier without it these locations remain collapsed onto the `include` directive as before. where verification results persisted after switching files. The status bar now correctly listens to active editor changes and hides for non-Raven files.
-- **Race Conditions**: Refactored status bar logic into a centralized update function to prevent `Verifying` and `Success` states from conflicting.
-- **Hardcoded Paths**: Removed hardcoded executable paths in the server that caused crashes on non-author machines. The extension now uses the configured path or defaults to `raven` in PATH.
-- Improved error handling for Raven execution.
+- Related locations in Raven's standard library can be opened, either as the source in a Raven checkout or as a read-only document provided by the verifier.
+- Related locations in other files point to the right file, and those reported before their diagnostic are no longer dropped.
+- The status bar updates when switching editors, is hidden for files other than Raven's, and no longer shows conflicting states.
+- The extension no longer depends on fixed paths to the verifier: it uses the configured one, or `raven` on the PATH.
+- Failures to run Raven are handled better.
