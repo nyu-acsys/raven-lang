@@ -127,8 +127,31 @@ jobs:
         with:
           path: artifacts
 
+      - name: Checkout CHANGELOG
+        uses: actions/checkout@v4
+        with:
+          path: src
+          sparse-checkout: CHANGELOG.md
+          sparse-checkout-cone-mode: false
+
+      # The release description is this version's CHANGELOG section. Without one, GitHub
+      # falls back to showing the tagged commit's message.
+      - name: Extract release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '$0 ~ "^## \\[" v "\\]" {f=1; next} f && /^## \[/ {exit} f' \
+            src/CHANGELOG.md | sed -e '/./,$!d' > NOTES.md
+          if ! grep -q '[^[:space:]]' NOTES.md; then
+            echo "CHANGELOG.md has no section for ${version}." >&2
+            exit 1
+          fi
+          cat NOTES.md
+
       - name: Attach packages to the release
         uses: softprops/action-gh-release@v2
         with:
+          body_path: NOTES.md
           files: artifacts/*/*.vsix
           fail_on_unmatched_files: true
