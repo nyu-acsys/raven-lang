@@ -61,11 +61,28 @@ interface RavenExecutable {
 
 let ravenExecutable: RavenExecutable = { executable: 'raven' };
 
+/**
+ * Resolves once the client has reported the executable's `lsp_protocol` (or that it has
+ * none). A check that starts before then waits for it, for a while: otherwise the first
+ * check of a document after startup would run as for a protocol-1 raven.
+ */
+let reportProtocol: () => void = () => { /* replaced below */ };
+const protocolReported = new Promise<void>(resolve => { reportProtocol = resolve; });
+const PROTOCOL_WAIT_MS = 3000;
+
+/** The executable and protocol the last check ran with, if any. */
+let checkedWith: { executable: string, lspProtocol?: number } | undefined;
+
 connection.onNotification('raven/executable', (params: RavenExecutable) => {
 	ravenExecutable = params;
+	reportProtocol();
 	connection.console.log(`Raven executable set to ${params.executable}`);
-	// Diagnostics on screen were produced by the previous binary.
-	connection.languages.diagnostics.refresh();
+	// Diagnostics on screen were produced by the previous binary, if it differs. The
+	// first report after startup usually only adds the protocol, which checks wait for.
+	if (checkedWith !== undefined
+		&& (checkedWith.executable !== params.executable || checkedWith.lspProtocol !== params.lspProtocol)) {
+		connection.languages.diagnostics.refresh();
+	}
 });
 
 connection.onInitialize((params: InitializeParams) => {
@@ -143,7 +160,12 @@ let globalSettings: ServerSettings = defaultSettings;
 // Cache the settings of all open documents
 const documentSettings = new Map<string, Thenable<ServerSettings>>();
 
-connection.onDidChangeConfiguration(change => {
+connection.onDidChangeConfiguration(async change => {
+	// The settings checks have used so far, to refresh the diagnostics only if they
+	// changed: the client also reports the configuration once right after startup.
+	const before = await Promise.all([...documentSettings.entries()].map(
+		async ([uri, settings]) => [uri, JSON.stringify(await settings)] as const));
+	const globalBefore = JSON.stringify(globalSettings);
 	if (hasConfigurationCapability) {
 		// Reset all cached document settings
 		documentSettings.clear();
@@ -152,8 +174,12 @@ connection.onDidChangeConfiguration(change => {
 			(change.settings.ravenServer || defaultSettings)
 		);
 	}
-	// Refresh the diagnostics since the settings could have changed.
-	connection.languages.diagnostics.refresh();
+	const changed = JSON.stringify(globalSettings) !== globalBefore
+		|| (await Promise.all(before.map(async ([uri, settings]) =>
+			JSON.stringify(await getDocumentSettings(uri)) !== settings))).some(c => c);
+	if (changed) {
+		connection.languages.diagnostics.refresh();
+	}
 });
 
 function getDocumentSettings(resource: string): Thenable<ServerSettings> {
@@ -232,7 +258,9 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 	// Call raven and delete tmp
 	const execFile = promisify(execCb);
 
+	await Promise.race([protocolReported, new Promise(resolve => setTimeout(resolve, PROTOCOL_WAIT_MS))]);
 	const { executable, z3Dir, lspProtocol } = ravenExecutable;
+	checkedWith = { executable, lspProtocol };
 
 	// Make the bundled z3 discoverable on PATH -- raven finds z3 via a PATH
 	// search when it spawns it, whichever raven is in use.
