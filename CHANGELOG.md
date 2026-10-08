@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Opening a file checks it once rather than three times: the language server no longer starts another check when the client reports the verifier or the configuration right after startup, unless either actually changed.
+
 ## [1.2.1] - 2026-09-06
 
 ### Fixed
