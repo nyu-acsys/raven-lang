@@ -30,7 +30,7 @@ export const RAVEN_REPO = { owner: 'nyu-acsys', repo: 'raven' };
  * Widen `max` when adapting to a new protocol; raise `min` only when dropping support
  * for an old one.
  */
-export const SUPPORTED_PROTOCOL = { min: 1, max: 2 };
+export const SUPPORTED_PROTOCOL = { min: 1, max: 3 };
 
 /** What `raven --manifest` prints, and what a release publishes as `manifest.json`. */
 export interface Manifest {

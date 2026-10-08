@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- With a verifier reporting `lsp_protocol` 3 or newer, a member that inherits its contract from an interface shows it in a code lens above its header and in full on hover, as soon as the file is type-checked. Hovering over the name of a module or interface shows the members it inherits from its interfaces, with their headers and contracts.
+
 ### Changed
 
 - `inline`, `opens` and `:>` are highlighted.

@@ -32,6 +32,7 @@ import {
 } from './ravenBinary';
 import { Release, fetchRelease, incompatibilityReason, installRelease, isNewer } from './ravenUpdate';
 import { LineMessages, gutterMarkers } from './gutter';
+import { registerInheritedContracts } from './inheritedContracts';
 
 let client: LanguageClient;
 let verificationSucceededStatusBarItem: vscode.StatusBarItem;
@@ -463,6 +464,8 @@ export function activate(context: ExtensionContext) {
 		serverOptions,
 		clientOptions
 	);
+
+	registerInheritedContracts(context, client);
 
 	// Create the status bar items
 	verificationSucceededStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
