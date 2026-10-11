@@ -470,6 +470,7 @@ export function activate(context: ExtensionContext) {
 		clientOptions
 	);
 
+	const inheritedContracts = registerInheritedContracts(context, client);
 	const changedFile = (uri: vscode.Uri, type: number) => {
 		if (client.isRunning()) client.sendNotification('workspace/didChangeWatchedFiles', {
 			changes: [{ uri: uri.toString(), type }]
@@ -489,6 +490,7 @@ export function activate(context: ExtensionContext) {
 			if (document?.version === update.version) dependencies.update(update);
 		}),
 		client.onNotification('raven/verificationInvalidated', (update: { uri: string, version: number, runId: number }) => {
+			inheritedContracts.onVerificationInvalidated(update);
 			const document = vscode.workspace.textDocuments.find(d => d.uri.toString() === update.uri);
 			if (document?.version === update.version) {
 				verificationStates.invalidate(update.uri, update.version, update.runId);
@@ -496,11 +498,10 @@ export function activate(context: ExtensionContext) {
 			}
 		}));
 
-	registerInheritedContracts(context, client);
-
 	verificationStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
 	context.subscriptions.push(verificationStatusBarItem);
 	context.subscriptions.push(client.onNotification('raven/verificationState', (update: VerificationUpdate) => {
+		inheritedContracts.onVerificationState(update);
 		const document = vscode.workspace.textDocuments.find(d => d.uri.toString() === update.uri);
 		if (document && verificationStates.update(update, document.version)) {
 			updateStatusBar(getActiveRavenEditor());

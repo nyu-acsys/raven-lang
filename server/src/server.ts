@@ -360,7 +360,8 @@ connection.languages.diagnostics.on(async (params, token) => {
 		kind: 'begin', title: 'Raven', cancellable: false, message: 'verifying', percentage: 0
 	});
 	try {
-		const result = await validateTextDocument(snapshot, strict, isCurrent, controller.signal, reportDependencies);
+		const result = await validateTextDocument(
+			snapshot, strict, isCurrent, controller.signal, reportDependencies, runId);
 		if (!isCurrent()) throw new ResponseError(LSPErrorCodes.ServerCancelled, 'Verification superseded', { retriggerRequest: true });
 		reportState(result.state, result.message);
 		const resultId = String(runId);
@@ -379,12 +380,19 @@ connection.languages.diagnostics.on(async (params, token) => {
 	}
 });
 
-async function validateTextDocument(textDocument: TextDocument, strictOverride: boolean | undefined, isCurrent: () => boolean, signal: AbortSignal, reportDependencies: (dependencies: string[] | undefined) => void): Promise<VerificationResult> {
+async function validateTextDocument(
+	textDocument: TextDocument,
+	strictOverride: boolean | undefined,
+	isCurrent: () => boolean,
+	signal: AbortSignal,
+	reportDependencies: (dependencies: string[] | undefined) => void,
+	runId: number
+): Promise<VerificationResult> {
 	const settings = await getDocumentSettings(textDocument.uri);
 	const strict = strictOverride ?? settings.strict;
 	const reportAnnotations = (contracts: InheritedContract[], modules: InheritedMembers[]) => {
 		if (isCurrent()) connection.sendNotification('raven/inheritedContracts', {
-			uri: textDocument.uri, version: textDocument.version, contracts, modules
+			uri: textDocument.uri, version: textDocument.version, runId, contracts, modules
 		});
 	};
 	const resultFor = (result: CheckResult): VerificationResult => ({

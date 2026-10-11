@@ -8,7 +8,9 @@
  * ------------------------------------------------------------------------------------------ */
 
 import * as vscode from 'vscode';
-import { LanguageClient } from 'vscode-languageclient/node';
+import type { LanguageClient } from 'vscode-languageclient/node';
+import { State } from 'vscode-languageclient';
+import type { VerificationUpdate } from './verificationStatus';
 
 interface Location { uri: string, range: vscode.Range }
 
@@ -22,6 +24,14 @@ interface InheritedContract {
 interface InheritedMembers {
 	range: vscode.Range,
 	members: { origin: string, text: string, location: Location }[]
+}
+
+interface InheritedAnnotations {
+	uri: string,
+	version: number,
+	runId: number,
+	contracts: InheritedContract[],
+	modules?: InheritedMembers[]
 }
 
 /** How many characters of the contract a code lens shows before shortening it. */
@@ -73,23 +83,59 @@ function membersHoverText(module: InheritedMembers): vscode.MarkdownString {
 }
 
 export function registerInheritedContracts(context: vscode.ExtensionContext, client: LanguageClient) {
-	const contracts = new Map<string, InheritedContract[]>();
-	const modules = new Map<string, InheritedMembers[]>();
+	const annotations = new Map<string, InheritedAnnotations>();
+	const runs = new Map<string, { version: number, runId: number, accepting: boolean }>();
 	const lensesChanged = new vscode.EventEmitter<void>();
-	context.subscriptions.push(lensesChanged);
-
-	client.onNotification('raven/inheritedContracts', (params: { uri: string, version?: number, contracts: InheritedContract[], modules?: InheritedMembers[] }) => {
-		const document = vscode.workspace.textDocuments.find(d => d.uri.toString() === params.uri);
-		if (!document || (params.version !== undefined && document.version !== params.version)) return;
-		contracts.set(params.uri, params.contracts);
-		modules.set(params.uri, params.modules ?? []);
-		lensesChanged.fire();
-	});
+	const openDocument = (uri: string) => vscode.workspace.textDocuments.find(d => d.uri.toString() === uri);
+	const currentAnnotations = (document: vscode.TextDocument) => {
+		const entry = annotations.get(document.uri.toString());
+		return entry?.version === document.version ? entry : undefined;
+	};
+	const invalidate = (uri: string) => {
+		const run = runs.get(uri);
+		if (run) run.accepting = false;
+		if (annotations.delete(uri)) lensesChanged.fire();
+	};
+	const clear = () => {
+		runs.clear();
+		const hadAnnotations = annotations.size > 0;
+		annotations.clear();
+		if (hadAnnotations) lensesChanged.fire();
+	};
+	const onVerificationState = (update: VerificationUpdate) => {
+		if (update.state !== 'running' || openDocument(update.uri)?.version !== update.version) return;
+		if ((runs.get(update.uri)?.runId ?? -1) >= update.runId) return;
+		invalidate(update.uri);
+		runs.set(update.uri, { version: update.version, runId: update.runId, accepting: true });
+	};
+	const onVerificationInvalidated = (update: { uri: string, version: number, runId: number }) => {
+		if (openDocument(update.uri)?.version !== update.version) return;
+		if ((runs.get(update.uri)?.runId ?? -1) <= update.runId) invalidate(update.uri);
+	};
+	context.subscriptions.push(lensesChanged, { dispose: clear },
+		vscode.workspace.onDidChangeTextDocument(({ document, contentChanges }) => {
+			if (contentChanges.length > 0) invalidate(document.uri.toString());
+		}),
+		vscode.workspace.onDidCloseTextDocument(document => {
+			invalidate(document.uri.toString());
+			runs.delete(document.uri.toString());
+		}),
+		client.onDidChangeState(({ newState }) => {
+			if (newState === State.Starting || newState === State.Stopped) clear();
+		}),
+		client.onNotification('raven/inheritedContracts', (params: InheritedAnnotations) => {
+			const document = openDocument(params.uri);
+			const run = runs.get(params.uri);
+			if (!document || !run?.accepting || document.version !== params.version
+				|| run.version !== params.version || run.runId !== params.runId) return;
+			annotations.set(params.uri, params);
+			lensesChanged.fire();
+		}));
 
 	context.subscriptions.push(vscode.languages.registerCodeLensProvider({ language: 'raven' }, {
 		onDidChangeCodeLenses: lensesChanged.event,
 		provideCodeLenses(document) {
-			return (contracts.get(document.uri.toString()) ?? []).map(contract =>
+			return (currentAnnotations(document)?.contracts ?? []).map(contract =>
 				new vscode.CodeLens(toRange(contract.range), {
 					title: `inherited: ${summary(contract)}`,
 					tooltip: `Contract inherited from ${contract.source}. Click to open it.`,
@@ -104,13 +150,14 @@ export function registerInheritedContracts(context: vscode.ExtensionContext, cli
 
 	context.subscriptions.push(vscode.languages.registerHoverProvider({ language: 'raven' }, {
 		provideHover(document, position) {
-			const uri = document.uri.toString();
-			const contract = (contracts.get(uri) ?? []).find(c => toRange(c.range).contains(position));
+			const current = currentAnnotations(document);
+			const contract = (current?.contracts ?? []).find(c => toRange(c.range).contains(position));
 			if (contract) {
 				return new vscode.Hover(hoverText(contract), toRange(contract.range));
 			}
-			const module = (modules.get(uri) ?? []).find(m => toRange(m.range).contains(position));
+			const module = (current?.modules ?? []).find(m => toRange(m.range).contains(position));
 			return module ? new vscode.Hover(membersHoverText(module), toRange(module.range)) : undefined;
 		}
 	}));
+	return { onVerificationState, onVerificationInvalidated };
 }

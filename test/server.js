@@ -143,6 +143,7 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 	const calls = () => fs.readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse);
 	const diagnostics = async (resource = uri) => {
 		const start = stateUpdates.length;
+		const annotationStart = annotations.length;
 		const response = await request('textDocument/diagnostic', { textDocument: { uri: resource } });
 		const updates = stateUpdates.slice(start).filter(update => update.uri === resource);
 		assert.strictEqual(updates.length, 2);
@@ -150,6 +151,10 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 		assert.notStrictEqual(updates[1].state, 'running');
 		assert.strictEqual(updates[0].runId, updates[1].runId);
 		assert.strictEqual(updates[0].version, updates[1].version);
+		for (const annotation of annotations.slice(annotationStart).filter(update => update.uri === resource)) {
+			assert.strictEqual(annotation.runId, updates[0].runId);
+			assert.strictEqual(annotation.version, updates[0].version);
+		}
 		return response.items;
 	};
 	const waitForState = (uri, state) => new Promise((resolve, reject) => {
