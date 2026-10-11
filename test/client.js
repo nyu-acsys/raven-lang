@@ -302,19 +302,21 @@ const ERROR = vscodeStub.DiagnosticSeverity.Error;
 const INFO = vscodeStub.DiagnosticSeverity.Information;
 const WARNING = vscodeStub.DiagnosticSeverity.Warning;
 
-function diagnostic(line, severity, message, source = 'raven') {
-	return { range: { start: { line }, end: { line, character: 10 } }, severity, message, source };
+function diagnostic(line, severity, message, source = 'raven', code) {
+	return { range: { start: { line }, end: { line, character: 10 } }, severity, message, source, code };
 }
 
 async function gutterChecks() {
 	console.log('gutter markers');
-	await check('marks failures and related locations separately', () => {
-		const { errors, related } = gutter.gutterMarkers([
+	await check('marks failures, warnings and related locations separately', () => {
+		const { errors, warnings, related } = gutter.gutterMarkers([
 			diagnostic(4, ERROR, '[Verification Error] A postcondition may not hold'),
-			diagnostic(9, INFO, '[Related Location] This assertion may not hold')
+			diagnostic(9, INFO, '[Related Location] This assertion may not hold'),
+			diagnostic(0, WARNING, '[Warning] Assumed termination', 'raven', 'strict')
 		]);
 		assert.deepStrictEqual([...errors.keys()], [4]);
 		assert.deepStrictEqual([...related.keys()], [9]);
+		assert.deepStrictEqual([...warnings.keys()], [0]);
 	});
 	await check('collects every message reported against a line', () => {
 		const { errors } = gutter.gutterMarkers([
@@ -331,6 +333,31 @@ async function gutterChecks() {
 		assert.deepStrictEqual([...errors.keys()], [4]);
 		assert.strictEqual(related.size, 0, 'the line should not be marked twice');
 	});
+	await check('errors outrank warnings and related locations while retaining every hover message', () => {
+		const messages = [
+			diagnostic(4, INFO, 'related'),
+			diagnostic(4, WARNING, 'first warning', 'raven', 'strict'),
+			diagnostic(4, ERROR, 'error'),
+			diagnostic(4, WARNING, 'second warning', 'raven', 'strict')
+		];
+		for (const items of [messages, [...messages].reverse()]) {
+			const { errors, warnings, related } = gutter.gutterMarkers(items);
+			assert.deepStrictEqual(errors.get(4), items.map(item => item.message));
+			assert.strictEqual(warnings.size + related.size, 0);
+		}
+	});
+	await check('warnings outrank related locations and retain their hover messages', () => {
+		const messages = [
+			diagnostic(4, INFO, 'related'),
+			diagnostic(4, WARNING, 'first warning', 'raven', 'strict'),
+			diagnostic(4, WARNING, 'second warning', 'raven', 'strict')
+		];
+		for (const items of [messages, [...messages].reverse()]) {
+			const { errors, warnings, related } = gutter.gutterMarkers(items);
+			assert.deepStrictEqual(warnings.get(4), items.map(item => item.message));
+			assert.strictEqual(errors.size + related.size, 0);
+		}
+	});
 	await check('marks only the line a multi-line diagnostic starts at', () => {
 		const spanning = {
 			range: { start: { line: 2 }, end: { line: 40 } },
@@ -339,15 +366,18 @@ async function gutterChecks() {
 		assert.deepStrictEqual([...gutter.gutterMarkers([spanning]).errors.keys()], [2]);
 	});
 	await check('ignores other extensions\' diagnostics', () => {
-		const { errors, related } = gutter.gutterMarkers([diagnostic(4, ERROR, 'x', 'eslint')]);
-		assert.strictEqual(errors.size + related.size, 0);
+		const { errors, warnings, related } = gutter.gutterMarkers([
+			diagnostic(4, ERROR, 'x', 'eslint'),
+			diagnostic(5, WARNING, 'y', 'eslint', 'strict')
+		]);
+		assert.strictEqual(errors.size + warnings.size + related.size, 0);
 	});
 	await check('ignores the warning reported when the verifier cannot run', () => {
 		// Pinned to line 1 and describing the whole run rather than that line.
-		const { errors, related } = gutter.gutterMarkers([
+		const { errors, warnings, related } = gutter.gutterMarkers([
 			diagnostic(0, WARNING, 'Failed to execute the Raven verifier at ...')
 		]);
-		assert.strictEqual(errors.size + related.size, 0);
+		assert.strictEqual(errors.size + warnings.size + related.size, 0);
 	});
 }
 

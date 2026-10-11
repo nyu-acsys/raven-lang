@@ -135,12 +135,12 @@ class LibrarySourceProvider implements vscode.TextDocumentContentProvider {
  * deliberately quiet and easy to miss.
  *
  * The icon has to be an image, and VS Code does not tint one with a ThemeColor, so the
- * colour is baked in and picked per theme kind. The values are VS Code's own defaults for
- * `editorError.foreground` and `editorInfo.foreground`, which is what draws the squiggles
- * these mark.
+ * colour is baked in and picked per theme kind. Colours and shapes distinguish errors,
+ * warnings and related locations.
  */
 
 let errorGutter: vscode.TextEditorDecorationType;
+let warningGutter: vscode.TextEditorDecorationType;
 let relatedGutter: vscode.TextEditorDecorationType;
 
 function createGutterDecorations(context: ExtensionContext): void {
@@ -152,8 +152,9 @@ function createGutterDecorations(context: ExtensionContext): void {
 		gutterIconSize: 'contain'
 	});
 	errorGutter = decoration('error');
+	warningGutter = decoration('warning');
 	relatedGutter = decoration('related');
-	context.subscriptions.push(errorGutter, relatedGutter);
+	context.subscriptions.push(errorGutter, warningGutter, relatedGutter);
 }
 
 function showGutterIcons(resource: vscode.Uri): boolean {
@@ -170,6 +171,7 @@ function refreshGutterIcons(editor: vscode.TextEditor): void {
 
 	if (!showGutterIcons(editor.document.uri)) {
 		editor.setDecorations(errorGutter, []);
+		editor.setDecorations(warningGutter, []);
 		editor.setDecorations(relatedGutter, []);
 		return;
 	}
@@ -177,7 +179,7 @@ function refreshGutterIcons(editor: vscode.TextEditor): void {
 	// Several diagnostics regularly share a line, so a marker's hover carries all of
 	// their messages -- the quickest way to read a related location without hunting for
 	// the underlined span it belongs to.
-	const { errors, related } = gutterMarkers(vscode.languages.getDiagnostics(editor.document.uri));
+	const { errors, warnings, related } = gutterMarkers(vscode.languages.getDiagnostics(editor.document.uri));
 	const decorationsFor = (lines: LineMessages) =>
 		[...lines.entries()].map(([line, messages]) => ({
 			range: new vscode.Range(line, 0, line, 0),
@@ -185,6 +187,7 @@ function refreshGutterIcons(editor: vscode.TextEditor): void {
 		}));
 
 	editor.setDecorations(errorGutter, decorationsFor(errors));
+	editor.setDecorations(warningGutter, decorationsFor(warnings));
 	editor.setDecorations(relatedGutter, decorationsFor(related));
 }
 

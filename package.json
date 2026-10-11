@@ -94,7 +94,7 @@
           "scope": "resource",
           "type": "boolean",
           "default": true,
-          "description": "Mark lines carrying a diagnostic with an icon in the editor's gutter: an error icon for failures, an information icon for related locations. Hovering an icon shows the messages on that line. Requires the glyph margin to be visible ('editor.glyphMargin')."
+          "description": "Mark lines carrying a diagnostic with an icon in the editor's gutter: an error icon for failures, a warning icon for warnings, and an information icon for related locations. Hovering an icon shows the messages on that line. Requires the glyph margin to be visible ('editor.glyphMargin')."
         },
         "ravenServer.highlightRelatedLocations": {
           "scope": "resource",

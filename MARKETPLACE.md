@@ -48,7 +48,7 @@ Set `ravenServer.strict` to `true` to enable strict mode for automatic verificat
 
 For a single strict check, run **Raven: Verify File in Strict Mode** from the Command Palette. This checks the active file regardless of the setting and leaves it unchanged; subsequent checks use the configured mode.
 
-Strict warnings appear in the editor and Problems panel. Verification can succeed with warnings: the status reads **Raven: Verified with warnings** in yellow, with a tooltip explaining why. Verification errors still show a red failure indicator.
+Strict warnings appear in the editor and Problems panel, with yellow gutter markers when gutter icons are enabled. Verification can succeed with warnings: the status reads **Raven: Verified with warnings** in yellow, with a tooltip explaining why. Verification errors still show a red failure indicator.
 
 Strict-mode diagnostics and inherited-contract displays require a Raven verifier supporting LSP protocol 3 or later. An older verifier reports that strict-mode diagnostics are unavailable; use **Raven: Update Verifier** to check for a compatible update.
 
@@ -157,7 +157,7 @@ This extension provides the following settings:
 * `ravenServer.updateChannel`: `stable` (follow Raven releases), `tag` (use the release named by `ravenServer.ravenVersion`), or `bundled` (only ever use the shipped verifier).
 * `ravenServer.ravenVersion`: The release tag to use on the `tag` channel, e.g. `v1.4.0`.
 * `ravenServer.checkForUpdates`: Whether to check daily for a newer verifier.
-* `ravenServer.showGutterIcons`: Mark lines carrying a diagnostic with an icon in the editor's gutter.
+* `ravenServer.showGutterIcons`: Show red error, yellow warning and blue information icons in the editor's gutter.
 * `ravenServer.highlightRelatedLocations`: Underline a diagnostic's related locations in the editor.
 
 ## Developing Raven or This Extension

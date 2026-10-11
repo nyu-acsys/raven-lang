@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Add **Raven: Verify File in Strict Mode** for a one-off strict check, and `ravenServer.strict` for strict-mode warnings, with a yellow success indicator when warnings are present. Requires Raven LSP protocol 3 or later.
+- Add **Raven: Verify File in Strict Mode** for a one-off strict check, and `ravenServer.strict` for strict-mode warnings, with yellow warning gutter markers and a yellow success indicator when warnings are present. Requires Raven LSP protocol 3 or later.
 - With a verifier reporting `lsp_protocol` 3 or newer, a member that inherits its contract from an interface shows it in a code lens above its header and in full on hover, as soon as the file is type-checked. Hovering over the name of a module or interface shows the members it inherits from its interfaces, with their headers and contracts.
 
 ### Changed
