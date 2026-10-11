@@ -402,8 +402,9 @@ async function validateTextDocument(textDocument: TextDocument, strictOverride?:
 			// explains -- Raven prints the declaration a rule was inherited from ahead of the
 			// failure, and the unproven assertion after it. Leading ones used to be dropped
 			// outright (`diagnostics.pop()` on an empty array), so buffer them and attach
-			// them to the next diagnostic instead.
+			// them to the next error instead.
 			let pendingRelated: DiagnosticRelatedInformation[] = [];
+			let previousError: Diagnostic | undefined;
 
 			// Underlines for related locations that fall inside this document, collected
 			// separately so they are appended after the errors they explain.
@@ -433,9 +434,8 @@ async function validateTextDocument(textDocument: TextDocument, strictOverride?:
 							location: { uri, range: rangeOf(err) },
 							message: `${msg}`
 						};
-						const previous = diagnostics[diagnostics.length - 1];
-						if (previous) {
-							previous.relatedInformation = [...(previous.relatedInformation ?? []), related];
+						if (previousError) {
+							previousError.relatedInformation = [...(previousError.relatedInformation ?? []), related];
 						} else {
 							pendingRelated.push(related);
 						}
@@ -463,9 +463,13 @@ async function validateTextDocument(textDocument: TextDocument, strictOverride?:
 						message: `[${kind_string}] ${msg}`,
 						source: 'raven'
 					};
-					if (pendingRelated.length > 0) {
-						diagnostic.relatedInformation = pendingRelated;
-						pendingRelated = [];
+					// Warnings do not change the error that related locations explain.
+					if (err.kind !== "Warning") {
+						previousError = diagnostic;
+						if (pendingRelated.length > 0) {
+							diagnostic.relatedInformation = pendingRelated;
+							pendingRelated = [];
+						}
 					}
 					diagnostics.push(diagnostic);
 				}

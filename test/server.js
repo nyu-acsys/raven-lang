@@ -27,6 +27,17 @@ const errors = [];
 if (args.includes('--strict')) errors.push({ ...location, kind: 'Warning', message: ['Assumed termination'] });
 if (text.includes('VERIFY_ERROR') && !args.includes('--typeonly')) errors.push({ ...location, kind: 'Verification', message: ['Assertion failed'] });
 if (text.includes('TYPE_ERROR')) errors.push({ ...location, kind: 'Type', message: ['Type mismatch'] });
+if (text.includes('RELATED_ERROR') && !args.includes('--typeonly')) {
+	const related = (message, line, source = file) => ({ ...location, file: source, start_line: line, end_line: line, kind: 'RelatedLoc', message: [message] });
+	const included = ${JSON.stringify(path.join(dir, 'included.rav'))};
+	errors.push(related('Inherited declaration', 1, included));
+	if (args.includes('--strict')) errors.push({ ...location, kind: 'Warning', message: ['Second assumption'] });
+	errors.push(related('Leading assertion', 3));
+	errors.push({ ...location, kind: 'Verification', message: ['Assertion failed'] });
+	errors.push(related('Trailing assertion', 5));
+	if (args.includes('--strict')) errors.push({ ...location, kind: 'Warning', message: ['Third assumption'] });
+	errors.push(related('Included assertion', 7, included));
+}
 console.log(JSON.stringify(args.includes('--lsp-annotations') ? { errors, annotations: [] } : errors));
 `, { mode: 0o755 });
 	const server = spawn(process.execPath, [path.join(__dirname, '../server/out/server.js'), '--stdio']);
@@ -82,7 +93,7 @@ console.log(JSON.stringify(args.includes('--lsp-annotations') ? { errors, annota
 	try {
 		await request('initialize', {
 			processId: process.pid,
-			capabilities: { workspace: { configuration: true }, textDocument: { diagnostic: {} } }
+			capabilities: { workspace: { configuration: true }, textDocument: { diagnostic: {}, publishDiagnostics: { relatedInformation: true } } }
 		});
 		send({ method: 'initialized', params: {} });
 		send({ method: 'raven/executable', params: { executable, lspProtocol: 3 } });
@@ -171,6 +182,26 @@ console.log(JSON.stringify(args.includes('--lsp-annotations') ? { errors, annota
 		assert.deepStrictEqual(await diagnostics(), []);
 		assert(calls().slice(-2).every(args => !args.includes('--strict')));
 		console.log('  ok   ordinary verification continues using the configured mode');
+		for (const strict of [true, false]) {
+			const resource = pathToFileURL(path.join(dir, strict ? 'strict-related.rav' : 'related.rav')).toString();
+			settings.set(resource, { ...defaultSettings, strict });
+			send({ method: 'textDocument/didOpen', params: { textDocument: { uri: resource, languageId: 'raven', version: 1, text: 'RELATED_ERROR' } } });
+			const items = await diagnostics(resource);
+			const warnings = items.filter(d => d.severity === 2);
+			assert.strictEqual(warnings.length, strict ? 3 : 0);
+			assert(warnings.every(d => d.relatedInformation === undefined));
+			const failures = items.filter(d => d.severity === 1);
+			assert.strictEqual(failures.length, 1);
+			assert.deepStrictEqual(failures[0].relatedInformation.map(r => r.message), [
+				'Inherited declaration', 'Leading assertion', 'Trailing assertion', 'Included assertion'
+			]);
+			const includedUri = pathToFileURL(path.join(dir, 'included.rav')).toString();
+			assert.deepStrictEqual(failures[0].relatedInformation.map(r => r.location.uri), [
+				includedUri, resource, resource, includedUri
+			]);
+			assert.deepStrictEqual(items.filter(d => d.severity === 3).map(d => d.range.start.line), [2, 4]);
+			console.log(`  ok   leading and trailing related locations belong to the error with strict mode ${strict ? 'on' : 'off'}`);
+		}
 		assert.strictEqual(stderr, '');
 		await request('shutdown', null);
 		send({ method: 'exit' });
