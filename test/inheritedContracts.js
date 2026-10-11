@@ -79,10 +79,10 @@ const open = (name, version = 1) => {
 	return document;
 };
 const range = line => new Range(line, 0, line, 10);
-const publish = (document, runId, version = document.version, text = 'n >= 0') => emit('raven/inheritedContracts', {
+const publish = (document, runId, version = document.version, text = 'n >= 0', keyword = 'ensures') => emit('raven/inheritedContracts', {
 	uri: document.uri.toString(), version, runId,
 	contracts: [{ range: range(0), source: 'I.bound', sourceLocation: { uri: 'file:///tests/interface.rav', range: range(1) },
-		clauses: [{ keyword: 'ensures', text, failing: false, location: { uri: 'file:///tests/interface.rav', range: range(2) } }] }],
+		clauses: [{ keyword, text, failing: false, location: { uri: 'file:///tests/interface.rav', range: range(2) } }] }],
 	modules: [{ range: range(3), members: [{ origin: 'I', text: 'func bound() returns (n: Int)',
 		location: { uri: 'file:///tests/interface.rav', range: range(1) } }] }]
 });
@@ -107,6 +107,13 @@ const visible = (document, text = 'n >= 0') => {
 };
 
 try {
+	const opensDocument = open('opens');
+	start(opensDocument, 1);
+	publish(opensDocument, 1, opensDocument.version, '{}', 'opens');
+	assert(lenses(opensDocument)[0].command.title.includes('opens {}'));
+	assert(hover(opensDocument, 0).contents.value.includes('opens {}'));
+	console.log('  ok   opens-only inherited contracts appear in code lenses and hovers');
+
 	let refreshes = 0;
 	context.subscriptions.push(providers.lenses.onDidChangeCodeLenses(() => refreshes++));
 	let document = open('main');
