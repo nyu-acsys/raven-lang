@@ -5,6 +5,7 @@
 
 import * as path from 'path';
 import { execFile } from 'child_process';
+import { verificationStatus } from './verificationStatus';
 import { workspace, ExtensionContext } from 'vscode';
 import * as vscode from 'vscode';
 import { ProgressType } from 'vscode-languageclient';
@@ -56,15 +57,16 @@ function updateStatusBar(editor: vscode.TextEditor | undefined) {
 
 	// Check diagnostics for errors
 	const diagnostics = vscode.languages.getDiagnostics(editor.document.uri);
-	const hasErrors = diagnostics.some(d => d.severity === vscode.DiagnosticSeverity.Error);
+	const status = verificationStatus(diagnostics);
 
-	if (hasErrors) {
+	if (status === 'failed') {
 		verificationFailedStatusBarItem.show();
 	} else {
-		// If no errors, we assume success unless we are verifying (which is handled by progress)
-		// However, we need to know if we are currently verifying to decide whether to show "Success" or "Verifying".
-		// The original logic just showed "Success" if no errors, and "Verifying" was triggered by progress.
-		// We will show "Success" here. Progress events will override this.
+		const warnings = status === 'warnings';
+		verificationSucceededStatusBarItem.color = new vscode.ThemeColor(warnings ? 'charts.yellow' : 'charts.green');
+		verificationSucceededStatusBarItem.tooltip = warnings
+			? 'Raven: Verification was successful with strict-mode warnings'
+			: 'Raven: Verification was successful';
 		verificationSucceededStatusBarItem.show();
 	}
 }
@@ -557,19 +559,17 @@ export function activate(context: ExtensionContext) {
 		}
 	});
 
-	// Register manual verification command
-	context.subscriptions.push(vscode.commands.registerCommand('raven.verify', () => {
+	const verifyFile = (strict?: boolean) => {
 		const editor = getActiveRavenEditor();
-		if (editor) {
-			// Provide immediate feedback
-			verificationVerifyingStatusBarItem.show();
-			verificationSucceededStatusBarItem.hide();
-			verificationFailedStatusBarItem.hide();
+		if (!editor) return;
 
-			// Trigger verification
-			client.sendNotification('raven/verify', { uri: editor.document.uri.toString() });
-		}
-	}));
+		verificationVerifyingStatusBarItem.show();
+		verificationSucceededStatusBarItem.hide();
+		verificationFailedStatusBarItem.hide();
+		client.sendNotification('raven/verify', { uri: editor.document.uri.toString(), strict });
+	};
+	context.subscriptions.push(vscode.commands.registerCommand('raven.verify', () => verifyFile()));
+	context.subscriptions.push(vscode.commands.registerCommand('raven.verifyStrict', () => verifyFile(true)));
 
 	context.subscriptions.push(vscode.commands.registerCommand('raven.updateVerifier', () =>
 		checkForUpdate(context, true)));

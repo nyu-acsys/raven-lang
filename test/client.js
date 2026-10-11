@@ -1,7 +1,7 @@
 /*
  * Checks for the extension's client-side logic: choosing and installing a verifier
  * (client/src/ravenBinary.ts, client/src/ravenUpdate.ts) and deciding which lines get a
- * gutter marker (client/src/gutter.ts).
+ * gutter marker (client/src/gutter.ts), and verification status with strict warnings.
  *
  * Run with `npm test`, which compiles first: this exercises the built output in
  * client/out, which is what actually ships.
@@ -47,6 +47,7 @@ Module._load = function (request, parent, isMain) {
 const binary = require(path.join(OUT, 'ravenBinary.js'));
 const update = require(path.join(OUT, 'ravenUpdate.js'));
 const gutter = require(path.join(OUT, 'gutter.js'));
+const { verificationStatus } = require(path.join(OUT, 'verificationStatus.js'));
 
 // --- harness --------------------------------------------------------------------------
 
@@ -60,6 +61,13 @@ async function check(name, fn) {
 		console.log(`  FAIL ${name}: ${err.message}`);
 	}
 }
+
+const strictWarning = { source: 'raven', severity: 1, code: 'strict' };
+assert.strictEqual(verificationStatus([]), 'succeeded');
+assert.strictEqual(verificationStatus([strictWarning]), 'warnings');
+assert.strictEqual(verificationStatus([strictWarning, { severity: 0 }]), 'failed');
+assert.strictEqual(verificationStatus([{ source: 'other', severity: 1, code: 'strict' }]), 'succeeded');
+assert.strictEqual(verificationStatus([{ source: 'raven', severity: 1 }]), 'succeeded');
 
 // --- fixture --------------------------------------------------------------------------
 

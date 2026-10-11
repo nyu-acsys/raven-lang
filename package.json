@@ -101,6 +101,12 @@
           "type": "boolean",
           "default": true,
           "description": "Underline a diagnostic's related locations in the editor (in the Information colour, rather than the error's red) when they fall in the file being edited. They remain listed under the diagnostic in the Problems panel either way."
+        },
+        "ravenServer.strict": {
+          "scope": "resource",
+          "type": "boolean",
+          "default": false,
+          "description": "Run Raven in strict mode, warning about assumed termination, explicit free declarations and physically atomic blocks. Requires a verifier supporting LSP protocol 3 or later."
         }
       }
     },
@@ -108,6 +114,11 @@
       {
         "command": "raven.verify",
         "title": "Raven: Verify File",
+        "category": "Raven"
+      },
+      {
+        "command": "raven.verifyStrict",
+        "title": "Raven: Verify File in Strict Mode",
         "category": "Raven"
       },
       {
@@ -161,7 +172,7 @@
     "watch": "tsc -b -w",
     "lint": "eslint",
     "postinstall": "cd client && npm install && cd ../server && npm install && cd ..",
-    "test": "npm run compile && node test/client.js"
+    "test": "npm run compile && node test/client.js && node test/server.js"
   },
   "devDependencies": {
     "@eslint/js": "^9.13.0",

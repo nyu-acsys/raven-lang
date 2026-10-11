@@ -44,12 +44,15 @@ To point the extension at a different `raven` build instead (e.g. a local develo
 
 This overrides the bundled binary for the current scope (e.g. per workspace), which is convenient for testing changes to Raven itself without reinstalling the extension. Z3 must still be reachable — either the bundled copy (found automatically) or one on your own `PATH`.
 
+Use **Raven: Verify File in Strict Mode** from the Command Palette for a single strict verification of the active file, regardless of `ravenServer.strict`. It leaves the setting unchanged; subsequent automatic checks and **Raven: Verify File** use the configured mode.
+
 ## Configuration
 
 This extension provides the following settings:
 
 * `ravenServer.maxNumberOfProblems`: Controls the maximum number of problems produced by the server.
 * `ravenServer.trace.server`: Traces the communication between VS Code and the language server.
+* `ravenServer.strict`: Enable strict-mode warnings for assumed termination, explicit `free` declarations and physically atomic blocks. Defaults to `false`; can be set per workspace or folder. Requires a verifier supporting LSP protocol 3 or later. Warnings appear in the Problems panel and editor without marking verification as failed; successful verification is shown in yellow when strict warnings are present.
 * `ravenServer.executablePath`: Path to the Raven executable. Leave empty to let the extension choose one; overrides the update channel.
 * `ravenServer.updateChannel`: `stable` (follow Raven releases), `tag` (use the release named by `ravenServer.ravenVersion`), or `bundled` (only ever use the shipped verifier).
 * `ravenServer.ravenVersion`: The release tag to use on the `tag` channel, e.g. `v1.4.0`.
@@ -155,7 +158,7 @@ $ npx @vscode/vsce package
 $ code --install-extension raven-verifier-<version>.vsix
 ```
 
-`npm test` covers the code that installs verifiers — version ordering, compatibility gating, checksum verification, and a full install against a release fixture served over local HTTPS. Set `RAVEN_TEST_NETWORK=1` to also query the real GitHub releases API, as [CI](.github/workflows/ci.yml) does.
+`npm test` also checks strict-mode configuration and diagnostics over LSP, and the success indicator with warnings. It covers the code that installs verifiers — version ordering, compatibility gating, checksum verification, and a full install against a release fixture served over local HTTPS. Set `RAVEN_TEST_NETWORK=1` to also query the real GitHub releases API, as [CI](.github/workflows/ci.yml) does.
 
 A plain `vsce package` like this produces an unbundled extension (no `raven`/`z3` included) — fine for extension development, but you'll need `ravenServer.executablePath` set (see First Usage) to actually verify anything. Platform-specific packages that bundle `raven`/`z3` are built by [`.github/workflows/package.yml`](.github/workflows/package.yml), which downloads binaries pinned in [`RAVEN_VERSION`](RAVEN_VERSION) and [`Z3_VERSION`](Z3_VERSION) and runs `vsce package --target <platform>`.
 

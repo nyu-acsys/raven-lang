@@ -150,12 +150,13 @@ connection.onInitialized(() => {
 const LIBRARY_SCHEME = 'raven-stdlib';
 
 interface ServerSettings {
+	strict: boolean;
 	maxNumberOfProblems: number;
 	highlightRelatedLocations: boolean;
 }
 
 // The global settings, used when the `workspace/configuration` request is not supported by the client.
-const defaultSettings: ServerSettings = { maxNumberOfProblems: 1000, highlightRelatedLocations: true };
+const defaultSettings: ServerSettings = { strict: false, maxNumberOfProblems: 1000, highlightRelatedLocations: true };
 let globalSettings: ServerSettings = defaultSettings;
 
 // Cache the settings of all open documents
@@ -198,16 +199,22 @@ function getDocumentSettings(resource: string): Thenable<ServerSettings> {
 	return result;
 }
 
+// A manual command can override strict mode for the next check of its document.
+const pendingStrictChecks = new Map<string, boolean>();
+
 // Only keep settings for open documents
 documents.onDidClose(e => {
 	documentSettings.delete(e.document.uri);
+	pendingStrictChecks.delete(e.document.uri);
 });
 
 // Define progress types for workDoneProgress
 const WorkDoneProgressType = new ProgressType<any>();
 
 // Handle manual verification trigger from client
-connection.onNotification('raven/verify', (params: { uri: string }) => {
+connection.onNotification('raven/verify', (params: { uri: string, strict?: boolean }) => {
+	if (params.strict !== undefined) pendingStrictChecks.set(params.uri, params.strict);
+	else pendingStrictChecks.delete(params.uri);
 	connection.console.log(`Manual verification triggered for ${params.uri}`);
 	connection.languages.diagnostics.refresh();
 });
@@ -265,7 +272,9 @@ connection.languages.diagnostics.on(async (params) => {
 	const document = documents.get(params.textDocument.uri);
 	let diagnostics: Diagnostic[] = [];
 	if (document !== undefined) {
-		diagnostics = await validateTextDocument(document);
+		const strict = pendingStrictChecks.get(document.uri);
+		pendingStrictChecks.delete(document.uri);
+		diagnostics = await validateTextDocument(document, strict);
 	}
 
 	if (params.workDoneToken) {
@@ -281,8 +290,9 @@ connection.languages.diagnostics.on(async (params) => {
 	} satisfies DocumentDiagnosticReport;
 });
 
-async function validateTextDocument(textDocument: TextDocument): Promise<Diagnostic[]> {
+async function validateTextDocument(textDocument: TextDocument, strictOverride?: boolean): Promise<Diagnostic[]> {
 	const settings = await getDocumentSettings(textDocument.uri);
+	const strict = strictOverride ?? settings.strict;
 
 	// Create temporary file from document
 	// Use vscode-uri to get the directory efficiently
@@ -313,6 +323,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 	const protocol = lspProtocol ?? 0;
 	const argsWith = (extra: string[]) => [
 		"--lsp-mode", "-q", ...extra,
+		...(strict && protocol >= 3 ? ["--strict"] : []),
 		// Protocol 3: Raven also reports annotations, such as inherited contracts.
 		...(protocol >= 3 ? ["--lsp-annotations"] : []),
 		...(protocol >= 2 ? ["--extension", "auto"] : []),
@@ -355,7 +366,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 			if (!Array.isArray(output)) {
 				annotations.push(...(output.annotations ?? []));
 			}
-			failed = errors.some(e => e.kind !== "RelatedLoc");
+			failed = errors.some(e => e.kind !== "RelatedLoc" && e.kind !== "Warning");
 
 			// Raven reports every location in whatever file it is really in: the temporary
 			// copy of this document, a file reached through `include`, or one of its own
@@ -410,6 +421,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 					.with({ kind: 'Internal' }, () => 'Internal Error')
 					.with({ kind: 'Unsupported' }, () => 'Unsupported Error')
 					.with({ kind: 'RelatedLoc' }, () => 'Related Location')
+					.with({ kind: 'Warning' }, () => 'Warning')
 					.otherwise(() => "Error");
 
 				const msg = err.message.join("\n");
@@ -445,7 +457,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 					}
 				} else {
 					const diagnostic: Diagnostic = {
-						severity: DiagnosticSeverity.Error,
+						severity: err.kind === "Warning" ? DiagnosticSeverity.Warning : DiagnosticSeverity.Error,
+						...(err.kind === "Warning" ? { code: "strict" } : {}),
 						range: rangeOf(err),
 						message: `[${kind_string}] ${msg}`,
 						source: 'raven'
@@ -520,7 +533,16 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 				return typed.diagnostics;
 			}
 		}
-		return (await check([])).diagnostics;
+		const result = (await check([])).diagnostics;
+		if (strict && protocol < 3) {
+			result.push({
+				severity: DiagnosticSeverity.Warning,
+				range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+				message: 'Strict-mode diagnostics require a newer Raven verifier (LSP protocol 3 or later). Update the verifier to enable them.',
+				source: 'raven'
+			});
+		}
+		return result;
 	} finally {
 		tmpfile.removeCallback();
 	}

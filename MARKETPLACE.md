@@ -10,8 +10,10 @@ New to Raven? **[nyu-acsys.github.io/raven](https://nyu-acsys.github.io/raven/)*
 
 - **Syntax Highlighting**: Proper highlighting for `.rav` files.
 - **Verification**: Automatic verification as you edit, with error diagnostics.
-- **Manual Verification**: Trigger verification manually with `Cmd+Shift+R`.
-- **Diagnostics**: Errors and warnings shown directly in the editor.
+- **Manual Verification**: Run **Raven: Verify File**, or use `Cmd+Shift+R` (Mac) / `Alt+Shift+R` (Windows/Linux).
+- **Strict Mode**: Warn about assumed termination, explicit `free` declarations and physically atomic blocks, with a yellow success indicator when warnings are present.
+- **Diagnostics**: Errors and warnings shown in the editor and Problems panel, with related locations and optional gutter icons.
+- **Inherited Contracts**: View inherited contracts above callable headers and on hover, and inherited module members on hover.
 
 ## Prerequisites
 
@@ -28,11 +30,27 @@ code --install-extension nyu-acsys.raven-verifier
 ## Usage
 
 * **Verification**: Verification runs automatically as you edit — no need to save first.
-* **Manual Verification**: You can trigger verification manually by pressing `Cmd+Shift+R` (Mac) or `Alt+Shift+R` (Windows/Linux) when editing a `.rav` file.
+* **Manual Verification**: Run **Raven: Verify File** from the Command Palette, or press `Cmd+Shift+R` (Mac) or `Alt+Shift+R` (Windows/Linux) when editing a `.rav` file.
+
+### Strict verification
+
+Set `ravenServer.strict` to `true` to enable strict mode for automatic verification and **Raven: Verify File**. It defaults to `false` and can be set per workspace or folder:
+
+```json
+{
+  "ravenServer.strict": true
+}
+```
+
+For a single strict check, run **Raven: Verify File in Strict Mode** from the Command Palette. This checks the active file regardless of the setting and leaves it unchanged; subsequent checks use the configured mode.
+
+Strict warnings appear in the editor and Problems panel. Verification can succeed with warnings: the success indicator turns yellow, with a tooltip explaining why. Verification errors still show a red failure indicator.
+
+Strict-mode diagnostics and inherited-contract displays require a Raven verifier supporting LSP protocol 3 or later. An older verifier reports that strict-mode diagnostics are unavailable; use **Raven: Update Verifier** to check for a compatible update.
 
 ## Staying up to date
 
-The extension ships with a working verifier, and also keeps up with new Raven releases on its own, so you get a new verifier without waiting for a new extension. It checks at most once a day and asks before downloading anything; `Raven: Show Verifier Version` says what is currently in use.
+The extension ships with a working verifier, and also keeps up with new Raven releases on its own, so you get a new verifier without waiting for a new extension. It checks at most once a day and asks before downloading anything; `Raven: Show Verifier Version` says what is currently in use. Run **Raven: Update Verifier** to check for updates on demand.
 
 To turn this off, set `ravenServer.updateChannel` to `bundled` (or run `Raven: Use Bundled Verifier`). To pin a particular Raven release, set the channel to `tag` and name it in `ravenServer.ravenVersion`.
 
@@ -130,7 +148,8 @@ This extension provides the following settings:
 
 * `ravenServer.maxNumberOfProblems`: Controls the maximum number of problems produced by the server.
 * `ravenServer.trace.server`: Traces the communication between VS Code and the language server.
-* `ravenServer.executablePath`: Path to the Raven executable. Leave empty to let the extension choose one.
+* `ravenServer.strict`: Enable strict-mode warnings for automatic and ordinary manual verification. Defaults to `false`; see [Strict verification](#strict-verification).
+* `ravenServer.executablePath`: Path to the Raven executable. Leave empty to let the extension choose one; overrides the update channel.
 * `ravenServer.updateChannel`: `stable` (follow Raven releases), `tag` (use the release named by `ravenServer.ravenVersion`), or `bundled` (only ever use the shipped verifier).
 * `ravenServer.ravenVersion`: The release tag to use on the `tag` channel, e.g. `v1.4.0`.
 * `ravenServer.checkForUpdates`: Whether to check daily for a newer verifier.
