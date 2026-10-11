@@ -44,7 +44,7 @@ To point the extension at a different `raven` build instead (e.g. a local develo
 
 This overrides the bundled binary for the current scope (e.g. per workspace), which is convenient for testing changes to Raven itself without reinstalling the extension. Z3 must still be reachable — either the bundled copy (found automatically) or one on your own `PATH`.
 
-The status bar tracks the active file and its current version. Messages use the **Raven:** prefix: grey for not checked or outdated results, blue while verifying, green when verified, yellow when verified with strict warnings, red for errors, and orange when verification is unavailable. Editing a file invalidates its previous result; results from older versions or superseded checks cannot replace the current state.
+The status bar tracks the active file and its current version. Messages use the **Raven:** prefix: grey for not checked or outdated results, blue while verifying, green when verified, yellow when verified with strict warnings, red for errors, and orange when verification is unavailable. Editing a file invalidates its previous result and stops obsolete Raven and Z3 processes. At most two verifier processes run concurrently; remaining checks wait for a slot. Results from older versions or superseded checks cannot replace the current state.
 
 Use **Raven: Verify File in Strict Mode** from the Command Palette for a single strict verification of the active file, regardless of `ravenServer.strict`. It leaves the setting unchanged; subsequent automatic checks and **Raven: Verify File** use the configured mode.
 

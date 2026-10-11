@@ -28,8 +28,7 @@ import {
 	TextDocument
 } from 'vscode-languageserver-textdocument';
 import { URI, Utils } from 'vscode-uri';
-import { execFile as execCb } from "child_process";
-import { promisify } from "node:util";
+import { VerificationProcesses } from './verificationProcesses';
 import { match } from "ts-pattern";
 import * as tmp from 'tmp';
 import * as fs from "fs";
@@ -73,17 +72,19 @@ let reportProtocol: () => void = () => { /* replaced below */ };
 const protocolReported = new Promise<void>(resolve => { reportProtocol = resolve; });
 const PROTOCOL_WAIT_MS = 3000;
 
-/** The executable and protocol the last check ran with, if any. */
-let checkedWith: { executable: string, lspProtocol?: number } | undefined;
+/** Initial protocol discovery need not restart a check still waiting for it. */
+let hasStartedChecking = false;
 
 connection.onNotification('raven/executable', (params: RavenExecutable) => {
+	const executableChanged = ravenExecutable.executable !== params.executable || ravenExecutable.z3Dir !== params.z3Dir;
+	const changed = executableChanged || ravenExecutable.lspProtocol !== params.lspProtocol;
 	ravenExecutable = params;
+	if (executableChanged || (changed && hasStartedChecking)) cancelAllRuns();
 	reportProtocol();
 	connection.console.log(`Raven executable set to ${params.executable}`);
 	// Diagnostics on screen were produced by the previous binary, if it differs. The
 	// first report after startup usually only adds the protocol, which checks wait for.
-	if (checkedWith !== undefined
-		&& (checkedWith.executable !== params.executable || checkedWith.lspProtocol !== params.lspProtocol)) {
+	if (hasStartedChecking && changed) {
 		connection.languages.diagnostics.refresh();
 	}
 });
@@ -182,6 +183,7 @@ connection.onDidChangeConfiguration(async change => {
 		|| (await Promise.all(before.map(async ([uri, settings]) =>
 			JSON.stringify(await getDocumentSettings(uri)) !== settings))).some(c => c);
 	if (changed) {
+		cancelAllRuns();
 		connection.languages.diagnostics.refresh();
 	}
 });
@@ -203,14 +205,34 @@ function getDocumentSettings(resource: string): Thenable<ServerSettings> {
 
 // A manual command can override strict mode for the next check of its document.
 const pendingStrictChecks = new Map<string, boolean>();
-const activeRuns = new Map<string, number>();
+interface VerificationRun { id: number, controller: AbortController, retriggerRequest: boolean }
+const activeRuns = new Map<string, VerificationRun>();
+const verificationProcesses = new VerificationProcesses();
+function cancelRun(uri: string, retriggerRequest = true): void {
+	const run = activeRuns.get(uri);
+	activeRuns.delete(uri);
+	if (run) {
+		run.retriggerRequest = retriggerRequest;
+		run.controller.abort();
+	}
+}
+function cancelAllRuns(retriggerRequest = true): void {
+	for (const uri of activeRuns.keys()) cancelRun(uri, retriggerRequest);
+}
+connection.onShutdown(async () => {
+	cancelAllRuns(false);
+	await verificationProcesses.waitForIdle();
+});
+connection.onExit(() => cancelAllRuns(false));
+process.on('exit', () => cancelAllRuns(false));
+documents.onDidChangeContent(e => cancelRun(e.document.uri));
 let nextRunId = 0;
 
 // Only keep settings for open documents
 documents.onDidClose(e => {
 	documentSettings.delete(e.document.uri);
 	pendingStrictChecks.delete(e.document.uri);
-	activeRuns.delete(e.document.uri);
+	cancelRun(e.document.uri, false);
 });
 
 // Define progress types for workDoneProgress
@@ -220,6 +242,7 @@ const WorkDoneProgressType = new ProgressType<any>();
 connection.onNotification('raven/verify', (params: { uri: string, strict?: boolean }) => {
 	if (params.strict !== undefined) pendingStrictChecks.set(params.uri, params.strict);
 	else pendingStrictChecks.delete(params.uri);
+	cancelRun(params.uri);
 	connection.console.log(`Manual verification triggered for ${params.uri}`);
 	connection.languages.diagnostics.refresh();
 });
@@ -272,8 +295,16 @@ connection.languages.diagnostics.on(async (params, token) => {
 
 	const snapshot = TextDocument.create(document.uri, document.languageId, document.version, document.getText());
 	const runId = ++nextRunId;
-	activeRuns.set(snapshot.uri, runId);
-	const isCurrent = () => activeRuns.get(snapshot.uri) === runId
+	cancelRun(snapshot.uri, false);
+	const controller = new AbortController();
+	const run: VerificationRun = { id: runId, controller, retriggerRequest: true };
+	activeRuns.set(snapshot.uri, run);
+	const cancellation = token.onCancellationRequested(() => cancelRunIfCurrent());
+	function cancelRunIfCurrent(): void {
+		if (activeRuns.get(snapshot.uri)?.id === runId) cancelRun(snapshot.uri, false);
+	}
+	if (token.isCancellationRequested) cancelRunIfCurrent();
+	const isCurrent = () => activeRuns.get(snapshot.uri)?.id === runId
 		&& documents.get(snapshot.uri)?.version === snapshot.version && !token.isCancellationRequested;
 	const reportState = (state: 'running' | CompletedState, message?: string) => {
 		if (isCurrent()) connection.sendNotification('raven/verificationState', {
@@ -287,19 +318,24 @@ connection.languages.diagnostics.on(async (params, token) => {
 		kind: 'begin', title: 'Raven', cancellable: false, message: 'verifying', percentage: 0
 	});
 	try {
-		const result = await validateTextDocument(snapshot, strict, isCurrent);
+		const result = await validateTextDocument(snapshot, strict, isCurrent, controller.signal);
 		if (!isCurrent()) throw new ResponseError(LSPErrorCodes.ServerCancelled, 'Verification superseded', { retriggerRequest: true });
 		reportState(result.state, result.message);
 		return { kind: DocumentDiagnosticReportKind.Full, items: result.diagnostics } satisfies DocumentDiagnosticReport;
 	} catch (error) {
+		if (!isCurrent()) throw new ResponseError(
+			token.isCancellationRequested ? LSPErrorCodes.RequestCancelled : LSPErrorCodes.ServerCancelled,
+			'Verification superseded', { retriggerRequest: run.retriggerRequest && documents.get(snapshot.uri) !== undefined });
 		reportState('unavailable', String(error));
 		throw error;
 	} finally {
+		cancellation.dispose();
+		if (activeRuns.get(snapshot.uri)?.id === runId) activeRuns.delete(snapshot.uri);
 		if (params.workDoneToken) connection.sendProgress(WorkDoneProgressType, params.workDoneToken, { kind: 'end', message: 'done' });
 	}
 });
 
-async function validateTextDocument(textDocument: TextDocument, strictOverride: boolean | undefined, isCurrent: () => boolean): Promise<VerificationResult> {
+async function validateTextDocument(textDocument: TextDocument, strictOverride: boolean | undefined, isCurrent: () => boolean, signal: AbortSignal): Promise<VerificationResult> {
 	const settings = await getDocumentSettings(textDocument.uri);
 	const strict = strictOverride ?? settings.strict;
 	const reportAnnotations = (contracts: InheritedContract[], modules: InheritedMembers[]) => {
@@ -314,6 +350,8 @@ async function validateTextDocument(textDocument: TextDocument, strictOverride: 
 		message: result.unavailable
 	});
 
+	if (!isCurrent()) throw new Error('Verification superseded');
+
 	// Create temporary file from document
 	// Use vscode-uri to get the directory efficiently
 	const uri = URI.parse(textDocument.uri);
@@ -321,15 +359,12 @@ async function validateTextDocument(textDocument: TextDocument, strictOverride: 
 
 	connection.console.log(`raven base dir: ${dir}`);
 
+	await Promise.race([protocolReported, new Promise(resolve => setTimeout(resolve, PROTOCOL_WAIT_MS))]);
+	if (!isCurrent()) throw new Error('Verification superseded');
 	const tmpfile = tmp.fileSync({ postfix: ".rav" });
 	fs.appendFileSync(tmpfile.fd, textDocument.getText());
-
-	// Call raven and delete tmp
-	const execFile = promisify(execCb);
-
-	await Promise.race([protocolReported, new Promise(resolve => setTimeout(resolve, PROTOCOL_WAIT_MS))]);
 	const { executable, z3Dir, lspProtocol } = ravenExecutable;
-	checkedWith = { executable, lspProtocol };
+	hasStartedChecking = true;
 
 	// Make the bundled z3 discoverable on PATH -- raven finds z3 via a PATH
 	// search when it spawns it, whichever raven is in use.
@@ -359,8 +394,7 @@ async function validateTextDocument(textDocument: TextDocument, strictOverride: 
 		const diagnostics: Diagnostic[] = [];
 
 		try {
-			// connection.console.log(`Executing: ${executable} ${args.join(" ")}`);
-			const { stdout } = await execFile(executable, argsWith(extra), { cwd: dir, env });
+			const stdout = await verificationProcesses.run(executable, argsWith(extra), { cwd: dir, env }, signal);
 
 			connection.console.log(`Raven response: ${stdout}`);
 
@@ -525,6 +559,7 @@ async function validateTextDocument(textDocument: TextDocument, strictOverride: 
 			}));
 		reportAnnotations(contracts, modules);
 		} catch (error: any) {
+			if (signal.aborted) throw error;
 			unavailable = error.message ?? String(error);
 			failed = true;
 			connection.console.error(`Error executing Raven: ${error.message}`);

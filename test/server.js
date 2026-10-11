@@ -6,6 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { pathToFileURL } = require('url');
+const { waitFor, isRunning } = require('./processes');
 
 // Exercise the compiled server over LSP, including configuration requests and refreshes.
 async function main() {
@@ -15,6 +16,7 @@ async function main() {
 	}
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'raven-strict-'));
 	const log = path.join(dir, 'calls.jsonl');
+	const blockedLog = path.join(dir, 'blocked.jsonl');
 	const executable = path.join(dir, 'raven');
 	fs.writeFileSync(executable, `#!${process.execPath}
 const fs = require('fs');
@@ -42,6 +44,13 @@ if (text.includes('RELATED_ERROR') && !args.includes('--typeonly')) {
 	if (args.includes('--strict')) errors.push({ ...location, kind: 'Warning', message: ['Third assumption'] });
 	errors.push(related('Included assertion', 7, included));
 }
+if ((text.includes('BLOCK_TYPE') && args.includes('--typeonly'))
+	|| (text.includes('BLOCK_VERIFY') && !args.includes('--typeonly'))) {
+	const solver = require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+	fs.appendFileSync(${JSON.stringify(blockedLog)}, JSON.stringify([process.pid, solver.pid]) + '\\n');
+	setInterval(() => {}, 1000);
+	return;
+}
 const emit = () => console.log(JSON.stringify(args.includes('--lsp-annotations') ? { errors, annotations: [] } : errors));
 if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 `, { mode: 0o755 });
@@ -62,12 +71,15 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 		server.stdin.write(`Content-Length: ${body.length}\r\n\r\n`);
 		server.stdin.write(body);
 	};
-	const request = (method, params) => new Promise((resolve, reject) => {
+	const request = (method, params) => {
 		const id = nextId++;
-		const timer = setTimeout(() => { pending.delete(id); reject(new Error(`Timed out: ${method}`)); }, 10000);
-		pending.set(id, { resolve, reject, timer });
-		send({ id, method, params });
-	});
+		const result = new Promise((resolve, reject) => {
+			const timer = setTimeout(() => { pending.delete(id); reject(new Error(`Timed out: ${method}`)); }, 10000);
+			pending.set(id, { resolve, reject, timer });
+			send({ id, method, params });
+		});
+		return Object.assign(result, { id });
+	};
 	server.stdout.on('data', data => {
 		buffer = Buffer.concat([buffer, data]);
 		while (true) {
@@ -126,12 +138,16 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 	try {
 		await request('initialize', {
 			processId: process.pid,
+			initializationOptions: { raven: { executable } },
 			capabilities: { workspace: { configuration: true }, textDocument: { diagnostic: {}, publishDiagnostics: { relatedInformation: true } } }
 		});
 		send({ method: 'initialized', params: {} });
-		send({ method: 'raven/executable', params: { executable, lspProtocol: 3 } });
 		send({ method: 'textDocument/didOpen', params: { textDocument: { uri, languageId: 'raven', version: 1, text: 'program' } } });
-		assert.deepStrictEqual(await diagnostics(), []);
+		const initialRunning = waitForState(uri, 'running');
+		const initialCheck = diagnostics();
+		await initialRunning;
+		send({ method: 'raven/executable', params: { executable, lspProtocol: 3 } });
+		assert.deepStrictEqual(await initialCheck, []);
 		assert.strictEqual(calls().length, 2);
 		assert.strictEqual(stateUpdates.at(-1).state, 'succeeded');
 		assert(calls().every(args => !args.includes('--strict')));
@@ -280,10 +296,67 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 			send({ method: 'textDocument/didClose', params: { textDocument: { uri: resource } } });
 		}
 		console.log('  ok   obsolete versions and superseded runs cannot publish final state or diagnostics');
+		const blockedCalls = () => fs.existsSync(blockedLog)
+			? fs.readFileSync(blockedLog, 'utf8').trim().split('\n').map(JSON.parse) : [];
+		const scenarios = ['edit', 'replace', 'close', 'request', 'manual', 'executable', 'settings', 'shutdown'];
+		for (const action of scenarios) {
+			const target = pathToFileURL(path.join(dir, `cancel-${action}.rav`)).toString();
+			const before = blockedCalls().length;
+			send({ method: 'textDocument/didOpen', params: { textDocument: { uri: target, languageId: 'raven', version: 1, text: action === 'close' ? 'BLOCK_TYPE' : 'BLOCK_VERIFY' } } });
+			const running = waitForState(target, 'running');
+			const oldRequest = request('textDocument/diagnostic', { textDocument: { uri: target } });
+			const oldResult = oldRequest.then(() => { throw new Error('Cancelled verification succeeded'); }, error => error);
+			const run = await running;
+			await waitFor(() => blockedCalls().length > before);
+			const pids = blockedCalls().at(-1);
+			assert(pids.every(isRunning));
+			if (action === 'edit') {
+				send({ method: 'textDocument/didChange', params: { textDocument: { uri: target, version: 2 }, contentChanges: [{ text: 'program' }] } });
+			} else if (action === 'replace') {
+				// The document version is unchanged: only the newer request cancels it.
+				const replacement = request('textDocument/diagnostic', { textDocument: { uri: target } });
+				const replacementResult = replacement.catch(error => error);
+				await waitFor(() => blockedCalls().length > before + 1);
+				send({ method: '$/cancelRequest', params: { id: replacement.id } });
+				await replacementResult;
+				await waitFor(() => blockedCalls().at(-1).every(pid => !isRunning(pid)));
+			} else if (action === 'close') {
+				send({ method: 'textDocument/didClose', params: { textDocument: { uri: target } } });
+			} else if (action === 'request') {
+				send({ method: '$/cancelRequest', params: { id: oldRequest.id } });
+			} else if (action === 'manual') {
+				send({ method: 'raven/verify', params: { uri: target } });
+			} else if (action === 'executable') {
+				send({ method: 'raven/executable', params: { executable, lspProtocol: 2 } });
+			} else if (action === 'settings') {
+				settings.set(target, { ...defaultSettings, strict: true });
+				send({ method: 'workspace/didChangeConfiguration', params: { settings: {} } });
+			} else {
+				await request('shutdown', null);
+			}
+			const cancelled = JSON.parse((await oldResult).message);
+			assert.match(cancelled.message, /Verification superseded/);
+			assert.strictEqual(cancelled.code, action === 'request' ? -32800 : -32802);
+			assert.strictEqual(cancelled.data.retriggerRequest, !['replace', 'close', 'request', 'shutdown'].includes(action));
+			await waitFor(() => pids.every(pid => !isRunning(pid)));
+			assert.deepStrictEqual(stateUpdates.filter(update => update.runId === run.runId).map(update => update.state), ['running']);
+			if (action !== 'shutdown') {
+				if (action === 'executable') send({ method: 'raven/executable', params: { executable, lspProtocol: 3 } });
+				if (action !== 'close') send({ method: 'textDocument/didClose', params: { textDocument: { uri: target } } });
+				assert.deepStrictEqual(await diagnostics(otherUri), []);
+			}
+			console.log(`  ok   ${action} cancels Raven and solver without publishing a failure`);
+		}
 		assert.strictEqual(stderr, '');
-		await request('shutdown', null);
 		send({ method: 'exit' });
 	} finally {
+		if (fs.existsSync(blockedLog)) {
+			for (const [pid, solverPid] of fs.readFileSync(blockedLog, 'utf8').trim().split('\n').map(JSON.parse)) {
+				for (const target of [pid, solverPid]) {
+					if (isRunning(target)) process.kill(target, 'SIGKILL');
+				}
+			}
+		}
 		server.kill();
 		for (const { timer } of pending.values()) clearTimeout(timer);
 		for (const { timer } of stateWaiters) clearTimeout(timer);
