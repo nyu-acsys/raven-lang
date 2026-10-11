@@ -248,10 +248,39 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 		assert.deepStrictEqual(await diagnostics(otherUri), []);
 		assert.deepStrictEqual((await diagnostics()).map(d => d.code), ['strict']);
 		assert(calls().slice(-2).every(args => args.includes('--strict')));
+		const afterStrict = calls().length;
+		const strictResultId = String(stateUpdates.at(-1).runId);
+		const strictCached = await request('textDocument/diagnostic', {
+			textDocument: { uri }, previousResultId: strictResultId
+		});
+		assert.strictEqual(strictCached.kind, 'unchanged');
+		assert.strictEqual(calls().length, afterStrict);
+		assert.strictEqual(stateUpdates.at(-1).state, 'warnings');
 		assert.strictEqual(settings.get(uri).strict, false);
 		assert.deepStrictEqual(await diagnostics(), []);
 		assert(calls().slice(-2).every(args => !args.includes('--strict')));
 		console.log('  ok   manual strict verification overrides settings for one check of the requested file');
+
+		const retryUri = pathToFileURL(path.join(dir, 'strict-retry.rav')).toString();
+		send({ method: 'textDocument/didOpen', params: { textDocument: { uri: retryUri, languageId: 'raven', version: 1, text: 'SLOW' } } });
+		send({ method: 'raven/verify', params: { uri: retryUri, strict: true } });
+		const retryStart = calls().length;
+		const firstRunning = waitForState(retryUri, 'running');
+		const firstPull = request('textDocument/diagnostic', { textDocument: { uri: retryUri } });
+		const firstResult = firstPull.catch(error => error);
+		await firstRunning;
+		await waitFor(() => calls().length > retryStart);
+		const strictReport = await request('textDocument/diagnostic', { textDocument: { uri: retryUri } });
+		assert.deepStrictEqual(strictReport.items.map(d => d.code), ['strict']);
+		assert((await firstResult) instanceof Error);
+		const afterRetry = calls().length;
+		const sameReport = await request('textDocument/diagnostic', {
+			textDocument: { uri: retryUri }, previousResultId: strictReport.resultId
+		});
+		assert.strictEqual(sameReport.kind, 'unchanged');
+		assert.strictEqual(calls().length, afterRetry);
+		assert.deepStrictEqual(await diagnostics(retryUri), []);
+		console.log('  ok   strict command survives superseded diagnostic pulls and cached results retain warnings');
 
 		const ordinaryRefresh = new Promise((resolve, reject) => {
 			const timer = setTimeout(() => reject(new Error('No manual diagnostics refresh')), 10000);

@@ -80,6 +80,7 @@ connection.onNotification('raven/executable', (params: RavenExecutable) => {
 	const changed = executableChanged || ravenExecutable.lspProtocol !== params.lspProtocol;
 	ravenExecutable = params;
 	if (executableChanged || (changed && hasStartedChecking)) {
+		pendingStrictChecks.clear();
 		completedResults.clear();
 		cancelAllRuns();
 	}
@@ -183,6 +184,7 @@ connection.onDidChangeConfiguration(async change => {
 		|| (await Promise.all(before.map(async ([uri, settings]) =>
 			JSON.stringify(await getDocumentSettings(uri)) !== settings))).some(c => c);
 	if (changed) {
+		pendingStrictChecks.clear();
 		completedResults.clear();
 		cancelAllRuns();
 		connection.languages.diagnostics.refresh();
@@ -204,7 +206,7 @@ function getDocumentSettings(resource: string): Thenable<ServerSettings> {
 	return result;
 }
 
-// A manual command can override strict mode for the next check of its document.
+// Keep a manual override through diagnostic retries until its check completes.
 const pendingStrictChecks = new Map<string, boolean>();
 interface VerificationRun { id: number, controller: AbortController, retriggerRequest: boolean, changedFiles: Set<string> }
 const activeRuns = new Map<string, VerificationRun>();
@@ -220,6 +222,7 @@ function invalidateDependents(changed: string[]): void {
 		return dependencies === undefined || changed.some(uri => dependencies.has(uri));
 	});
 	for (const document of affected) {
+		pendingStrictChecks.delete(document.uri);
 		completedResults.delete(document.uri);
 		cancelRun(document.uri);
 		connection.sendNotification('raven/verificationInvalidated', {
@@ -247,6 +250,7 @@ connection.onShutdown(async () => {
 connection.onExit(() => cancelAllRuns(false));
 process.on('exit', () => cancelAllRuns(false));
 documents.onDidChangeContent(e => {
+	pendingStrictChecks.delete(e.document.uri);
 	completedResults.delete(e.document.uri);
 	cancelRun(e.document.uri);
 });
@@ -354,7 +358,6 @@ connection.languages.diagnostics.on(async (params, token) => {
 		});
 	};
 	const strict = pendingStrictChecks.get(snapshot.uri);
-	pendingStrictChecks.delete(snapshot.uri);
 	reportState('running');
 	if (params.workDoneToken) connection.sendProgress(WorkDoneProgressType, params.workDoneToken, {
 		kind: 'begin', title: 'Raven', cancellable: false, message: 'verifying', percentage: 0
@@ -365,7 +368,8 @@ connection.languages.diagnostics.on(async (params, token) => {
 		if (!isCurrent()) throw new ResponseError(LSPErrorCodes.ServerCancelled, 'Verification superseded', { retriggerRequest: true });
 		reportState(result.state, result.message);
 		const resultId = String(runId);
-		if (result.state !== 'unavailable' && strict === undefined) completedResults.set(snapshot.uri, { version: snapshot.version, resultId });
+		pendingStrictChecks.delete(snapshot.uri);
+		if (result.state !== 'unavailable') completedResults.set(snapshot.uri, { version: snapshot.version, resultId });
 		return { kind: DocumentDiagnosticReportKind.Full, resultId, items: result.diagnostics } satisfies DocumentDiagnosticReport;
 	} catch (error) {
 		if (!isCurrent()) throw new ResponseError(
