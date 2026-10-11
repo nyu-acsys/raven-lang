@@ -79,7 +79,10 @@ connection.onNotification('raven/executable', (params: RavenExecutable) => {
 	const executableChanged = ravenExecutable.executable !== params.executable || ravenExecutable.z3Dir !== params.z3Dir;
 	const changed = executableChanged || ravenExecutable.lspProtocol !== params.lspProtocol;
 	ravenExecutable = params;
-	if (executableChanged || (changed && hasStartedChecking)) cancelAllRuns();
+	if (executableChanged || (changed && hasStartedChecking)) {
+		completedResults.clear();
+		cancelAllRuns();
+	}
 	reportProtocol();
 	connection.console.log(`Raven executable set to ${params.executable}`);
 	// Diagnostics on screen were produced by the previous binary, if it differs. The
@@ -115,7 +118,7 @@ connection.onInitialize((params: InitializeParams) => {
 		capabilities: {
 			textDocumentSync: TextDocumentSyncKind.Full,
 			diagnosticProvider: {
-				interFileDependencies: false,
+				interFileDependencies: true,
 				workspaceDiagnostics: false
 			}
 		}
@@ -141,10 +144,7 @@ connection.onInitialized(() => {
 			connection.console.log('Workspace folder change event received.');
 		});
 	}
-	connection.onDidSaveTextDocument(event => {
-		//validating handled by pull diagnostics usually, but we can trigger refresh
-		connection.languages.diagnostics.refresh();
-	});
+	connection.onDidSaveTextDocument(event => invalidateDependents([event.textDocument.uri]));
 });
 
 // The settings
@@ -183,6 +183,7 @@ connection.onDidChangeConfiguration(async change => {
 		|| (await Promise.all(before.map(async ([uri, settings]) =>
 			JSON.stringify(await getDocumentSettings(uri)) !== settings))).some(c => c);
 	if (changed) {
+		completedResults.clear();
 		cancelAllRuns();
 		connection.languages.diagnostics.refresh();
 	}
@@ -205,8 +206,28 @@ function getDocumentSettings(resource: string): Thenable<ServerSettings> {
 
 // A manual command can override strict mode for the next check of its document.
 const pendingStrictChecks = new Map<string, boolean>();
-interface VerificationRun { id: number, controller: AbortController, retriggerRequest: boolean }
+interface VerificationRun { id: number, controller: AbortController, retriggerRequest: boolean, changedFiles: Set<string> }
 const activeRuns = new Map<string, VerificationRun>();
+const documentDependencies = new Map<string, Set<string>>();
+const completedResults = new Map<string, { version: number, resultId: string }>();
+
+function invalidateDependents(changed: string[]): void {
+	if (changed.length === 0) return;
+	for (const run of activeRuns.values()) changed.forEach(uri => run.changedFiles.add(uri));
+	const affected = documents.all().filter(document => {
+		const dependencies = documentDependencies.get(document.uri);
+		// Older verifiers and checks still discovering their includes need a conservative refresh.
+		return dependencies === undefined || changed.some(uri => dependencies.has(uri));
+	});
+	for (const document of affected) {
+		completedResults.delete(document.uri);
+		cancelRun(document.uri);
+		connection.sendNotification('raven/verificationInvalidated', {
+			uri: document.uri, version: document.version, runId: nextRunId
+		});
+	}
+	if (affected.length > 0) connection.languages.diagnostics.refresh();
+}
 const verificationProcesses = new VerificationProcesses();
 function cancelRun(uri: string, retriggerRequest = true): void {
 	const run = activeRuns.get(uri);
@@ -225,12 +246,17 @@ connection.onShutdown(async () => {
 });
 connection.onExit(() => cancelAllRuns(false));
 process.on('exit', () => cancelAllRuns(false));
-documents.onDidChangeContent(e => cancelRun(e.document.uri));
+documents.onDidChangeContent(e => {
+	completedResults.delete(e.document.uri);
+	cancelRun(e.document.uri);
+});
 let nextRunId = 0;
 
 // Only keep settings for open documents
 documents.onDidClose(e => {
 	documentSettings.delete(e.document.uri);
+	documentDependencies.delete(e.document.uri);
+	completedResults.delete(e.document.uri);
 	pendingStrictChecks.delete(e.document.uri);
 	cancelRun(e.document.uri, false);
 });
@@ -242,6 +268,7 @@ const WorkDoneProgressType = new ProgressType<any>();
 connection.onNotification('raven/verify', (params: { uri: string, strict?: boolean }) => {
 	if (params.strict !== undefined) pendingStrictChecks.set(params.uri, params.strict);
 	else pendingStrictChecks.delete(params.uri);
+	completedResults.delete(params.uri);
 	cancelRun(params.uri);
 	connection.console.log(`Manual verification triggered for ${params.uri}`);
 	connection.languages.diagnostics.refresh();
@@ -293,11 +320,16 @@ connection.languages.diagnostics.on(async (params, token) => {
 	const document = documents.get(params.textDocument.uri);
 	if (!document) return { kind: DocumentDiagnosticReportKind.Full, items: [] } satisfies DocumentDiagnosticReport;
 
+	const cached = completedResults.get(document.uri);
+	if (!pendingStrictChecks.has(document.uri) && cached?.version === document.version && params.previousResultId === cached.resultId) {
+		return { kind: DocumentDiagnosticReportKind.Unchanged, resultId: cached.resultId } satisfies DocumentDiagnosticReport;
+	}
+	completedResults.delete(document.uri);
 	const snapshot = TextDocument.create(document.uri, document.languageId, document.version, document.getText());
 	const runId = ++nextRunId;
 	cancelRun(snapshot.uri, false);
 	const controller = new AbortController();
-	const run: VerificationRun = { id: runId, controller, retriggerRequest: true };
+	const run: VerificationRun = { id: runId, controller, retriggerRequest: true, changedFiles: new Set() };
 	activeRuns.set(snapshot.uri, run);
 	const cancellation = token.onCancellationRequested(() => cancelRunIfCurrent());
 	function cancelRunIfCurrent(): void {
@@ -311,6 +343,16 @@ connection.languages.diagnostics.on(async (params, token) => {
 			uri: snapshot.uri, version: snapshot.version, runId, state, message
 		});
 	};
+	const reportDependencies = (dependencies: string[] | undefined) => {
+		if (!isCurrent()) return;
+		if (dependencies) documentDependencies.set(snapshot.uri, new Set(dependencies));
+		else documentDependencies.delete(snapshot.uri);
+		const changed = dependencies?.filter(uri => run.changedFiles.has(uri)) ?? [];
+		if (changed.length > 0) { invalidateDependents(changed); return; }
+		connection.sendNotification('raven/dependencies', {
+			uri: snapshot.uri, version: snapshot.version, runId, dependencies: dependencies ?? []
+		});
+	};
 	const strict = pendingStrictChecks.get(snapshot.uri);
 	pendingStrictChecks.delete(snapshot.uri);
 	reportState('running');
@@ -318,10 +360,12 @@ connection.languages.diagnostics.on(async (params, token) => {
 		kind: 'begin', title: 'Raven', cancellable: false, message: 'verifying', percentage: 0
 	});
 	try {
-		const result = await validateTextDocument(snapshot, strict, isCurrent, controller.signal);
+		const result = await validateTextDocument(snapshot, strict, isCurrent, controller.signal, reportDependencies);
 		if (!isCurrent()) throw new ResponseError(LSPErrorCodes.ServerCancelled, 'Verification superseded', { retriggerRequest: true });
 		reportState(result.state, result.message);
-		return { kind: DocumentDiagnosticReportKind.Full, items: result.diagnostics } satisfies DocumentDiagnosticReport;
+		const resultId = String(runId);
+		if (result.state !== 'unavailable' && strict === undefined) completedResults.set(snapshot.uri, { version: snapshot.version, resultId });
+		return { kind: DocumentDiagnosticReportKind.Full, resultId, items: result.diagnostics } satisfies DocumentDiagnosticReport;
 	} catch (error) {
 		if (!isCurrent()) throw new ResponseError(
 			token.isCancellationRequested ? LSPErrorCodes.RequestCancelled : LSPErrorCodes.ServerCancelled,
@@ -335,7 +379,7 @@ connection.languages.diagnostics.on(async (params, token) => {
 	}
 });
 
-async function validateTextDocument(textDocument: TextDocument, strictOverride: boolean | undefined, isCurrent: () => boolean, signal: AbortSignal): Promise<VerificationResult> {
+async function validateTextDocument(textDocument: TextDocument, strictOverride: boolean | undefined, isCurrent: () => boolean, signal: AbortSignal, reportDependencies: (dependencies: string[] | undefined) => void): Promise<VerificationResult> {
 	const settings = await getDocumentSettings(textDocument.uri);
 	const strict = strictOverride ?? settings.strict;
 	const reportAnnotations = (contracts: InheritedContract[], modules: InheritedMembers[]) => {
@@ -401,6 +445,7 @@ async function validateTextDocument(textDocument: TextDocument, strictOverride: 
 			// No output = no problems found (and, before protocol 3, no annotations)
 			if (stdout == "") {
 				if (protocol >= 3) throw new Error('Empty diagnostic response from Raven');
+				reportDependencies(undefined);
 				reportAnnotations([], []);
 				return { diagnostics, failed };
 			}
@@ -413,6 +458,11 @@ async function validateTextDocument(textDocument: TextDocument, strictOverride: 
 				|| ![e.start_line, e.start_col, e.end_line, e.end_col].every(Number.isInteger))) {
 				throw new Error('Invalid diagnostic response from Raven');
 			}
+			const dependencies = Array.isArray(output) ? undefined : output.dependencies;
+			if (dependencies !== undefined && (!Array.isArray(dependencies) || dependencies.some(file => typeof file !== 'string'))) {
+				throw new Error('Invalid dependency response from Raven');
+			}
+			reportDependencies(dependencies?.map((file: string) => URI.file(path.resolve(dir, file)).toString()));
 			if (!Array.isArray(output)) annotations.push(...(output.annotations ?? []));
 			failed = errors.some(e => e.kind !== "RelatedLoc" && e.kind !== "Warning");
 
@@ -606,10 +656,7 @@ async function validateTextDocument(textDocument: TextDocument, strictOverride: 
 	}
 }
 
-connection.onDidChangeWatchedFiles(_change => {
-	// Monitored files have change in VSCode
-	connection.console.log('We received a file change event');
-});
+connection.onDidChangeWatchedFiles(change => invalidateDependents(change.changes.map(event => event.uri)));
 
 // This handler resolves additional information for the item selected in
 // the completion list.

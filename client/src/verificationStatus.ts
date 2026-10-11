@@ -36,9 +36,11 @@ export class VerificationTracker {
 		return true;
 	}
 
-	invalidate(uri: string, version: number): void {
+	invalidate(uri: string, version: number, afterRunId?: number): void {
 		const previous = this.documents.get(uri);
-		if (previous) this.documents.set(uri, { version, runId: previous.runId, state: 'outdated' });
+		if (previous && (afterRunId === undefined || previous.runId <= afterRunId)) {
+			this.documents.set(uri, { version, runId: previous.runId, state: 'outdated' });
+		}
 	}
 
 	unavailable(uri: string, version: number, message: string): void {
@@ -51,7 +53,7 @@ export class VerificationTracker {
 
 export const verificationPresentation: Record<VerificationState, { text: string, color: string, tooltip: string }> = {
 	unchecked: { text: '$(circle-outline) Raven: Not checked', color: 'descriptionForeground', tooltip: 'This document has no verification result yet.' },
-	outdated: { text: '$(history) Raven: Result outdated', color: 'descriptionForeground', tooltip: 'The document or verification configuration changed since the last check.' },
+	outdated: { text: '$(history) Raven: Result outdated', color: 'descriptionForeground', tooltip: 'The document, an included file or the verification configuration changed since the last check.' },
 	running: { text: '$(sync~spin) Raven: Verifying', color: 'charts.blue', tooltip: 'Raven is checking this document.' },
 	succeeded: { text: '$(check) Raven: Verified', color: 'charts.green', tooltip: 'Verification completed successfully for this document version.' },
 	warnings: { text: '$(warning) Raven: Verified with warnings', color: 'charts.yellow', tooltip: 'Verification completed successfully with strict-mode warnings.' },

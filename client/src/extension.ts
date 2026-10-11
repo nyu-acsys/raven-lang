@@ -34,6 +34,7 @@ import {
 import { Release, fetchRelease, incompatibilityReason, installRelease, isNewer } from './ravenUpdate';
 import { LineMessages, gutterMarkers } from './gutter';
 import { registerInheritedContracts } from './inheritedContracts';
+import { DependencyWatchers, DependencyUpdate } from './dependencyWatchers';
 
 let client: LanguageClient;
 let verificationStatusBarItem: vscode.StatusBarItem;
@@ -450,10 +451,6 @@ export function activate(context: ExtensionContext) {
 	const clientOptions: LanguageClientOptions = {
 		// Register the server for plain text documents
 		documentSelector: [{ scheme: 'file', language: 'raven' }],
-		synchronize: {
-			// Notify the server about file changes to '.clientrc files contained in the workspace
-			fileEvents: workspace.createFileSystemWatcher('**/.clientrc')
-		},
 		initializationOptions: {
 			raven: {
 				executable: currentBinary.executable,
@@ -470,6 +467,32 @@ export function activate(context: ExtensionContext) {
 		clientOptions
 	);
 
+	const changedFile = (uri: vscode.Uri, type: number) => {
+		if (client.isRunning()) client.sendNotification('workspace/didChangeWatchedFiles', {
+			changes: [{ uri: uri.toString(), type }]
+		}).catch(error => client.outputChannel.appendLine(`Could not report file change: ${error}`));
+	};
+	const dependencies = new DependencyWatchers(changedFile);
+	const workspaceFiles = workspace.createFileSystemWatcher('**/*.rav');
+	const changedWorkspaceFile = (uri: vscode.Uri, type: number) => {
+		if (!dependencies.has(uri)) changedFile(uri, type);
+	};
+	context.subscriptions.push(dependencies, workspaceFiles,
+		workspaceFiles.onDidCreate(uri => changedWorkspaceFile(uri, 1)),
+		workspaceFiles.onDidChange(uri => changedWorkspaceFile(uri, 2)),
+		workspaceFiles.onDidDelete(uri => changedWorkspaceFile(uri, 3)),
+		client.onNotification('raven/dependencies', (update: DependencyUpdate) => {
+			const document = vscode.workspace.textDocuments.find(d => d.uri.toString() === update.uri);
+			if (document?.version === update.version) dependencies.update(update);
+		}),
+		client.onNotification('raven/verificationInvalidated', (update: { uri: string, version: number, runId: number }) => {
+			const document = vscode.workspace.textDocuments.find(d => d.uri.toString() === update.uri);
+			if (document?.version === update.version) {
+				verificationStates.invalidate(update.uri, update.version, update.runId);
+				updateStatusBar(getActiveRavenEditor());
+			}
+		}));
+
 	registerInheritedContracts(context, client);
 
 	verificationStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
@@ -482,6 +505,7 @@ export function activate(context: ExtensionContext) {
 	}));
 	context.subscriptions.push(client.onDidChangeState(({ newState }) => {
 		if (newState === State.Starting) {
+			dependencies.dispose();
 			verificationStates.clear();
 			updateStatusBar(getActiveRavenEditor());
 		} else if (newState === State.Stopped) {
@@ -496,6 +520,7 @@ export function activate(context: ExtensionContext) {
 		}
 	}));
 	context.subscriptions.push(vscode.workspace.onDidCloseTextDocument(document => {
+		dependencies.close(document.uri.toString());
 		verificationStates.close(document.uri.toString());
 		updateStatusBar(getActiveRavenEditor());
 	}));

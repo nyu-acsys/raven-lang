@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Reverify affected documents when included files change.
 - Cancel obsolete verification processes and limit concurrent verifier runs.
 - Track verification state per document and version, with consistent `Raven:` labels and colors.
 - `inline`, `opens` and `:>` are highlighted.

@@ -21,6 +21,7 @@ const https = require('https');
 const Module = require('module');
 const os = require('os');
 const path = require('path');
+const { URI } = require('vscode-uri');
 
 const OUT = path.join(__dirname, '..', 'client', 'out');
 
@@ -29,8 +30,23 @@ const OUT = path.join(__dirname, '..', 'client', 'out');
 // The modules under test read settings through the vscode API. Nothing here runs inside
 // the editor, so stand in for the parts they touch.
 let settings = {};
+const dependencyWatchers = [];
+function dependencyWatcher(pattern) {
+	const events = {};
+	const watcher = { pattern, disposed: false, events,
+		onDidCreate: callback => { events.create = callback; },
+		onDidChange: callback => { events.change = callback; },
+		onDidDelete: callback => { events.delete = callback; },
+		dispose: () => { watcher.disposed = true; }
+	};
+	dependencyWatchers.push(watcher);
+	return watcher;
+}
 const vscodeStub = {
+	Uri: URI,
+	RelativePattern: class { constructor(baseUri, pattern) { this.baseUri = baseUri; this.pattern = pattern; } },
 	workspace: {
+		createFileSystemWatcher: dependencyWatcher,
 		getConfiguration: () => ({
 			get: (key, fallback) => (key in settings ? settings[key] : fallback)
 		})
@@ -47,6 +63,7 @@ Module._load = function (request, parent, isMain) {
 const binary = require(path.join(OUT, 'ravenBinary.js'));
 const update = require(path.join(OUT, 'ravenUpdate.js'));
 const gutter = require(path.join(OUT, 'gutter.js'));
+const { DependencyWatchers } = require(path.join(OUT, 'dependencyWatchers.js'));
 const { VerificationTracker, verificationPresentation } = require(path.join(OUT, 'verificationStatus.js'));
 
 // --- harness --------------------------------------------------------------------------
@@ -128,7 +145,60 @@ function selfSignedCert(dir) {
 // --- checks ---------------------------------------------------------------------------
 
 async function pureChecks() {
+	console.log('dependency watchers');
+	await check('shares directory watchers and reports only included files, including external and missing files', () => {
+		const events = [];
+		const watches = new DependencyWatchers((uri, type) => events.push([uri.toString(), type]));
+		const external = URI.file(path.join(os.tmpdir(), 'external-raven', 'file.inc'));
+		const missing = URI.file(path.join(os.tmpdir(), 'external-raven', 'missing.rav'));
+		const count = dependencyWatchers.length;
+		watches.update({ uri: 'root-a', runId: 1, dependencies: [external.toString(), missing.toString()] });
+		watches.update({ uri: 'root-b', runId: 2, dependencies: [external.toString()] });
+		assert.strictEqual(dependencyWatchers.length, count + 1);
+		const watcher = dependencyWatchers.at(-1);
+		assert.strictEqual(watcher.pattern.baseUri.fsPath, path.dirname(external.fsPath));
+		assert.strictEqual(watcher.pattern.pattern, '*');
+		watcher.events.create(missing);
+		watcher.events.change(external);
+		watcher.events.delete(external);
+		watcher.events.change(URI.file(path.join(path.dirname(external.fsPath), 'unrelated.rav')));
+		assert.deepStrictEqual(events, [[missing.toString(), 1], [external.toString(), 2], [external.toString(), 3]]);
+		watches.close('root-a');
+		assert(!watcher.disposed);
+		assert(!watches.has(missing));
+		assert(watches.has(external));
+		watches.close('root-b');
+		assert(watcher.disposed);
+		watches.dispose();
+	});
+	await check('replaces include graphs, rejects obsolete updates and clears watchers on restart', () => {
+		const watches = new DependencyWatchers(() => {});
+		const oldFile = URI.file(path.join(os.tmpdir(), 'old-includes', 'file.rav'));
+		const newFile = URI.file(path.join(os.tmpdir(), 'new-includes', 'file.rav'));
+		watches.update({ uri: 'root', runId: 1, dependencies: [oldFile.toString()] });
+		const oldWatcher = dependencyWatchers.at(-1);
+		watches.update({ uri: 'root', runId: 2, dependencies: [newFile.toString()] });
+		assert(oldWatcher.disposed);
+		assert(!watches.has(oldFile));
+		assert(watches.has(newFile));
+		watches.update({ uri: 'root', runId: 1, dependencies: [oldFile.toString()] });
+		assert(!watches.has(oldFile));
+		watches.dispose();
+		assert(dependencyWatchers.at(-1).disposed);
+		assert(!watches.has(newFile));
+		watches.update({ uri: 'root', runId: 1, dependencies: [oldFile.toString()] });
+		assert(watches.has(oldFile));
+		watches.dispose();
+	});
 	console.log('verification state');
+	await check('dependency invalidations cannot overwrite a newer run', () => {
+		const states = new VerificationTracker();
+		states.update({ uri: 'a', version: 1, runId: 2, state: 'running' }, 1);
+		states.invalidate('a', 1, 1);
+		assert.strictEqual(states.get('a', 1).state, 'running');
+		states.invalidate('a', 1, 2);
+		assert.strictEqual(states.get('a', 1).state, 'outdated');
+	});
 	await check('requires an explicit completed run before displaying success', () => {
 		const states = new VerificationTracker();
 		assert.strictEqual(states.get('a', 1).state, 'unchecked');

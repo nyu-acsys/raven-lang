@@ -34,6 +34,8 @@ code --install-extension nyu-acsys.raven-verifier
 
 The status bar tracks the active file and its current version. Messages use the **Raven:** prefix: grey for not checked or outdated results, blue while verifying, green when verified, yellow when verified with strict warnings, red for errors, and orange when verification is unavailable. Editing a file marks its previous result as outdated and stops the old check.
 
+With a recent Raven verifier, changes to saved included files also recheck the files that depend on them, including indirect includes and files outside the workspace.
+
 ### Strict verification
 
 Set `ravenServer.strict` to `true` to enable strict mode for automatic verification and **Raven: Verify File**. It defaults to `false` and can be set per workspace or folder:

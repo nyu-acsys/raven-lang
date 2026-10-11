@@ -30,6 +30,21 @@ if (text.includes('BAD_JSON')) { console.log('invalid JSON'); process.exit(0); }
 if (text.includes('BAD_PAYLOAD')) { console.log('{}'); process.exit(0); }
 if (text.includes('EMPTY_RESPONSE')) process.exit(0);
 const errors = [];
+const dependencies = new Set();
+const visit = (text, base) => {
+	for (const match of text.matchAll(/include "([^"\\n]+)"/g)) {
+		const dependency = require('path').resolve(base, match[1]);
+		if (dependencies.has(dependency)) continue;
+		dependencies.add(dependency);
+		if (!fs.existsSync(dependency)) errors.push({ ...location, kind: 'Type', message: ['Missing included file'] });
+		else {
+			const included = fs.readFileSync(dependency, 'utf8');
+			if (included.includes('INCLUDED_ERROR') && !args.includes('--typeonly')) errors.push({ ...location, kind: 'Verification', message: ['Included assertion failed'] });
+			visit(included, require('path').dirname(dependency));
+		}
+	}
+};
+visit(text, args[args.indexOf('--base-dir') + 1]);
 if (args.includes('--strict')) errors.push({ ...location, kind: 'Warning', message: ['Assumed termination'] });
 if (text.includes('VERIFY_ERROR') && !args.includes('--typeonly')) errors.push({ ...location, kind: 'Verification', message: ['Assertion failed'] });
 if (text.includes('TYPE_ERROR')) errors.push({ ...location, kind: 'Type', message: ['Type mismatch'] });
@@ -51,7 +66,7 @@ if ((text.includes('BLOCK_TYPE') && args.includes('--typeonly'))
 	setInterval(() => {}, 1000);
 	return;
 }
-const emit = () => console.log(JSON.stringify(args.includes('--lsp-annotations') ? { errors, annotations: [] } : errors));
+const emit = () => console.log(JSON.stringify(args.includes('--lsp-annotations') ? { errors, annotations: [], dependencies: [...dependencies] } : errors));
 if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 `, { mode: 0o755 });
 	const server = spawn(process.execPath, [path.join(__dirname, '../server/out/server.js'), '--stdio']);
@@ -61,6 +76,8 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 	const refreshes = [];
 	const stateUpdates = [];
 	const annotations = [];
+	const dependencyUpdates = [];
+	const invalidations = [];
 	const stateWaiters = [];
 	const settings = new Map();
 	const uri = pathToFileURL(path.join(dir, 'sample.rav')).toString();
@@ -106,6 +123,10 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 						waiter.resolve(message.params);
 					}
 				}
+			} else if (message.method === 'raven/dependencies') {
+				dependencyUpdates.push(message.params);
+			} else if (message.method === 'raven/verificationInvalidated') {
+				invalidations.push(message.params);
 			} else if (message.method === 'raven/inheritedContracts') {
 				annotations.push(message.params);
 			} else if (!message.method && pending.has(message.id)) {
@@ -298,7 +319,114 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 		console.log('  ok   obsolete versions and superseded runs cannot publish final state or diagnostics');
 		const blockedCalls = () => fs.existsSync(blockedLog)
 			? fs.readFileSync(blockedLog, 'utf8').trim().split('\n').map(JSON.parse) : [];
-		const scenarios = ['edit', 'replace', 'close', 'request', 'manual', 'executable', 'settings', 'shutdown'];
+		const includedDir = path.join(dir, 'includes');
+		fs.mkdirSync(includedDir);
+		const middle = path.join(includedDir, 'middle.rav');
+		const leaf = path.join(includedDir, 'leaf.rav');
+		const additional = path.join(includedDir, 'additional.rav');
+		fs.writeFileSync(middle, 'include "./leaf.rav"');
+		fs.writeFileSync(leaf, 'include "middle.rav"');
+		fs.writeFileSync(additional, '');
+		const includedRoot = pathToFileURL(path.join(dir, 'include-root.rav')).toString();
+		const includedText = 'include "includes/middle.rav"';
+		send({ method: 'textDocument/didOpen', params: { textDocument: { uri: includedRoot, languageId: 'raven', version: 1, text: includedText } } });
+		let includeReport = await request('textDocument/diagnostic', { textDocument: { uri: includedRoot } });
+		assert.deepStrictEqual(includeReport.items, []);
+		assert.deepStrictEqual(new Set(dependencyUpdates.at(-1).dependencies), new Set([middle, leaf].map(file => pathToFileURL(file).toString())));
+		const unrelated = await request('textDocument/diagnostic', { textDocument: { uri: otherUri } });
+		const unchanged = (uri, previousResultId) => request('textDocument/diagnostic', { textDocument: { uri }, previousResultId });
+		assert.strictEqual((await unchanged(includedRoot, includeReport.resultId)).kind, 'unchanged');
+		const beforeEmptyChanges = invalidations.length;
+		send({ method: 'workspace/didChangeWatchedFiles', params: { changes: [] } });
+		assert.strictEqual((await unchanged(includedRoot, includeReport.resultId)).kind, 'unchanged');
+		assert.strictEqual(invalidations.length, beforeEmptyChanges);
+
+		const changed = async (file, type = 2, method = 'workspace/didChangeWatchedFiles') => {
+			const refresh = new Promise((resolve, reject) => {
+				const timer = setTimeout(() => reject(new Error('No include diagnostics refresh')), 10000);
+				refreshes.push(() => { clearTimeout(timer); resolve(); });
+			});
+			const fileUri = pathToFileURL(file).toString();
+			send({ method, params: method === 'textDocument/didSave' ? { textDocument: { uri: fileUri } } : { changes: [{ uri: fileUri, type }] } });
+			await refresh;
+		};
+		fs.writeFileSync(leaf, 'INCLUDED_ERROR');
+		const beforeIncludedChange = invalidations.length;
+		await changed(leaf);
+		assert(invalidations.slice(beforeIncludedChange).some(update => update.uri === includedRoot && update.version === 1));
+		assert(!invalidations.slice(beforeIncludedChange).some(update => update.uri === otherUri));
+		const beforeUnrelated = calls().length;
+		assert.strictEqual((await unchanged(otherUri, unrelated.resultId)).kind, 'unchanged');
+		assert.strictEqual(calls().length, beforeUnrelated);
+		includeReport = await unchanged(includedRoot, includeReport.resultId);
+		assert.strictEqual(includeReport.kind, 'full');
+		assert.strictEqual(includeReport.items[0].severity, 1);
+		console.log('  ok   transitive include changes invalidate the unchanged root version and reuse unrelated results');
+
+		fs.unlinkSync(leaf);
+		await changed(leaf, 3);
+		includeReport = await unchanged(includedRoot, includeReport.resultId);
+		assert.match(includeReport.items[0].message, /Missing included file/);
+		assert(dependencyUpdates.at(-1).dependencies.includes(pathToFileURL(leaf).toString()));
+		fs.writeFileSync(leaf, 'include "additional.rav"');
+		await changed(leaf, 1);
+		includeReport = await unchanged(includedRoot, includeReport.resultId);
+		assert.deepStrictEqual(includeReport.items, []);
+		assert(dependencyUpdates.at(-1).dependencies.includes(pathToFileURL(additional).toString()));
+		fs.writeFileSync(additional, 'INCLUDED_ERROR');
+		await changed(additional);
+		includeReport = await unchanged(includedRoot, includeReport.resultId);
+		assert.strictEqual(includeReport.items.length, 1);
+		console.log('  ok   deleting, creating and adding transitive includes refreshes diagnostics and updates dependencies');
+
+		const leafUri = pathToFileURL(leaf).toString();
+		send({ method: 'textDocument/didOpen', params: { textDocument: { uri: leafUri, languageId: 'raven', version: 1, text: 'include "additional.rav"' } } });
+		const beforeUnsaved = invalidations.length;
+		send({ method: 'textDocument/didChange', params: { textDocument: { uri: leafUri, version: 2 }, contentChanges: [{ text: '' }] } });
+		assert.strictEqual((await unchanged(includedRoot, includeReport.resultId)).kind, 'unchanged');
+		assert(!invalidations.slice(beforeUnsaved).some(update => update.uri === includedRoot));
+		fs.writeFileSync(leaf, '');
+		await changed(leaf, 2, 'textDocument/didSave');
+		includeReport = await unchanged(includedRoot, includeReport.resultId);
+		assert.deepStrictEqual(includeReport.items, []);
+		assert(!dependencyUpdates.at(-1).dependencies.includes(pathToFileURL(additional).toString()));
+		const beforeRemovedInclude = invalidations.length;
+		await changed(additional);
+		assert(!invalidations.slice(beforeRemovedInclude).some(update => update.uri === includedRoot));
+		assert.strictEqual((await unchanged(includedRoot, includeReport.resultId)).kind, 'unchanged');
+		console.log('  ok   dependent checks use saved includes and stop tracking removed dependencies');
+
+		const newlyIncluded = path.join(dir, 'newly-included.rav');
+		fs.writeFileSync(newlyIncluded, '');
+		send({ method: 'textDocument/didChange', params: { textDocument: { uri: includedRoot, version: 2 }, contentChanges: [{ text: 'include "newly-included.rav"\nSLOW' }] } });
+		const beforeDiscovery = calls().length;
+		const discovering = request('textDocument/diagnostic', { textDocument: { uri: includedRoot } }).catch(error => error);
+		await waitFor(() => calls().length > beforeDiscovery);
+		fs.writeFileSync(newlyIncluded, 'INCLUDED_ERROR');
+		await changed(newlyIncluded);
+		assert.match((await discovering).message, /Verification superseded/);
+		includeReport = await request('textDocument/diagnostic', { textDocument: { uri: includedRoot } });
+		assert.strictEqual(includeReport.items.length, 1);
+		assert(dependencyUpdates.at(-1).dependencies.includes(pathToFileURL(newlyIncluded).toString()));
+		console.log('  ok   file changes during discovery of a new include graph reject the obsolete check');
+
+		// The graph is already known when the full check starts; a disk change must kill it.
+		send({ method: 'textDocument/didChange', params: { textDocument: { uri: includedRoot, version: 3 }, contentChanges: [{ text: includedText + '\nBLOCK_VERIFY' }] } });
+		const beforeBlockedInclude = blockedCalls().length;
+		const blockedRequest = request('textDocument/diagnostic', { textDocument: { uri: includedRoot } }).catch(error => error);
+		await waitFor(() => blockedCalls().length > beforeBlockedInclude);
+		const includePids = blockedCalls().at(-1);
+		await changed(leaf);
+		assert.match((await blockedRequest).message, /Verification superseded/);
+		await waitFor(() => includePids.every(pid => !isRunning(pid)));
+		assert.strictEqual(invalidations.at(-1).version >= 1, true);
+		send({ method: 'textDocument/didClose', params: { textDocument: { uri: includedRoot } } });
+		const beforeClosedInclude = invalidations.length;
+		await changed(leaf);
+		assert(!invalidations.slice(beforeClosedInclude).some(update => update.uri === includedRoot));
+		console.log('  ok   included-file changes cancel running verifier trees and closed roots no longer refresh');
+
+		const scenarios = ['edit' , 'replace', 'close', 'request', 'manual', 'executable', 'settings', 'shutdown'];
 		for (const action of scenarios) {
 			const target = pathToFileURL(path.join(dir, `cancel-${action}.rav`)).toString();
 			const before = blockedCalls().length;
