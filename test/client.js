@@ -47,7 +47,7 @@ Module._load = function (request, parent, isMain) {
 const binary = require(path.join(OUT, 'ravenBinary.js'));
 const update = require(path.join(OUT, 'ravenUpdate.js'));
 const gutter = require(path.join(OUT, 'gutter.js'));
-const { verificationStatus } = require(path.join(OUT, 'verificationStatus.js'));
+const { VerificationTracker, verificationPresentation } = require(path.join(OUT, 'verificationStatus.js'));
 
 // --- harness --------------------------------------------------------------------------
 
@@ -61,13 +61,6 @@ async function check(name, fn) {
 		console.log(`  FAIL ${name}: ${err.message}`);
 	}
 }
-
-const strictWarning = { source: 'raven', severity: 1, code: 'strict' };
-assert.strictEqual(verificationStatus([]), 'succeeded');
-assert.strictEqual(verificationStatus([strictWarning]), 'warnings');
-assert.strictEqual(verificationStatus([strictWarning, { severity: 0 }]), 'failed');
-assert.strictEqual(verificationStatus([{ source: 'other', severity: 1, code: 'strict' }]), 'succeeded');
-assert.strictEqual(verificationStatus([{ source: 'raven', severity: 1 }]), 'succeeded');
 
 // --- fixture --------------------------------------------------------------------------
 
@@ -135,6 +128,58 @@ function selfSignedCert(dir) {
 // --- checks ---------------------------------------------------------------------------
 
 async function pureChecks() {
+	console.log('verification state');
+	await check('requires an explicit completed run before displaying success', () => {
+		const states = new VerificationTracker();
+		assert.strictEqual(states.get('a', 1).state, 'unchecked');
+		assert.strictEqual(states.update({ uri: 'a', version: 1, runId: 1, state: 'succeeded' }, 1), false);
+		assert(states.update({ uri: 'a', version: 1, runId: 1, state: 'running' }, 1));
+		assert.strictEqual(states.get('a', 1).state, 'running');
+		assert(states.update({ uri: 'a', version: 1, runId: 1, state: 'succeeded' }, 1));
+		assert.strictEqual(states.get('a', 1).state, 'succeeded');
+	});
+	await check('tracks files independently and distinguishes failures from unavailable verification', () => {
+		const states = new VerificationTracker();
+		for (const [uri, state] of [['a', 'warnings'], ['b', 'failed'], ['c', 'unavailable']]) {
+			states.update({ uri, version: 1, runId: 1, state: 'running' }, 1);
+			states.update({ uri, version: 1, runId: 1, state }, 1);
+		}
+		assert.strictEqual(states.get('a', 1).state, 'warnings');
+		assert.strictEqual(states.get('b', 1).state, 'failed');
+		assert.strictEqual(states.get('c', 1).state, 'unavailable');
+	});
+	await check('rejects old versions and superseded runs', () => {
+		const states = new VerificationTracker();
+		states.update({ uri: 'a', version: 1, runId: 1, state: 'running' }, 1);
+		states.invalidate('a', 2);
+		assert.strictEqual(states.get('a', 2).state, 'outdated');
+		assert.strictEqual(states.update({ uri: 'a', version: 1, runId: 1, state: 'succeeded' }, 2), false);
+		states.update({ uri: 'a', version: 2, runId: 2, state: 'running' }, 2);
+		states.update({ uri: 'a', version: 2, runId: 3, state: 'running' }, 2);
+		assert.strictEqual(states.update({ uri: 'a', version: 2, runId: 2, state: 'failed' }, 2), false);
+		assert.strictEqual(states.get('a', 2).state, 'running');
+		assert(states.update({ uri: 'a', version: 2, runId: 3, state: 'succeeded' }, 2));
+	});
+	await check('invalidates a same-version recheck and forgets closed or restarted documents', () => {
+		const states = new VerificationTracker();
+		states.update({ uri: 'a', version: 1, runId: 4, state: 'running' }, 1);
+		states.invalidate('a', 1);
+		assert.strictEqual(states.update({ uri: 'a', version: 1, runId: 4, state: 'succeeded' }, 1), false);
+		states.close('a');
+		assert.strictEqual(states.get('a', 1).state, 'unchecked');
+		states.unavailable('a', 1, 'Server stopped');
+		assert.strictEqual(states.get('a', 1).message, 'Server stopped');
+		states.clear();
+		assert.strictEqual(states.get('a', 1).state, 'unchecked');
+		assert(states.update({ uri: 'a', version: 1, runId: 1, state: 'running' }, 1));
+	});
+	await check('all state labels identify Raven and use the agreed colors', () => {
+		const colors = { unchecked: 'descriptionForeground', outdated: 'descriptionForeground', running: 'charts.blue', succeeded: 'charts.green', warnings: 'charts.yellow', failed: 'charts.red', unavailable: 'charts.orange' };
+		for (const [state, color] of Object.entries(colors)) {
+			assert(verificationPresentation[state].text.includes('Raven: '));
+			assert.strictEqual(verificationPresentation[state].color, color);
+		}
+	});
 	console.log('version comparison');
 	await check('orders release versions', () => {
 		assert.strictEqual(binary.compareVersions('1.2.0', '1.3.0'), -1);

@@ -78,7 +78,9 @@ export function registerInheritedContracts(context: vscode.ExtensionContext, cli
 	const lensesChanged = new vscode.EventEmitter<void>();
 	context.subscriptions.push(lensesChanged);
 
-	client.onNotification('raven/inheritedContracts', (params: { uri: string, contracts: InheritedContract[], modules?: InheritedMembers[] }) => {
+	client.onNotification('raven/inheritedContracts', (params: { uri: string, version?: number, contracts: InheritedContract[], modules?: InheritedMembers[] }) => {
+		const document = vscode.workspace.textDocuments.find(d => d.uri.toString() === params.uri);
+		if (!document || (params.version !== undefined && document.version !== params.version)) return;
 		contracts.set(params.uri, params.contracts);
 		modules.set(params.uri, params.modules ?? []);
 		lensesChanged.fire();

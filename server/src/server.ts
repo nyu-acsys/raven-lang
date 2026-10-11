@@ -1,5 +1,7 @@
 import {
 	createConnection,
+	ResponseError,
+	LSPErrorCodes,
 	TextDocuments,
 	Diagnostic,
 	DiagnosticSeverity,
@@ -201,11 +203,14 @@ function getDocumentSettings(resource: string): Thenable<ServerSettings> {
 
 // A manual command can override strict mode for the next check of its document.
 const pendingStrictChecks = new Map<string, boolean>();
+const activeRuns = new Map<string, number>();
+let nextRunId = 0;
 
 // Only keep settings for open documents
 documents.onDidClose(e => {
 	documentSettings.delete(e.document.uri);
 	pendingStrictChecks.delete(e.document.uri);
+	activeRuns.delete(e.document.uri);
 });
 
 // Define progress types for workDoneProgress
@@ -257,42 +262,57 @@ function locationKey(uri: string, range: Range): string {
 	return `${uri}:${range.start.line}:${range.start.character}:${range.end.line}:${range.end.character}`;
 }
 
-connection.languages.diagnostics.on(async (params) => {
-	// Use workDoneToken for progress reporting if present
-	if (params.workDoneToken) {
-		connection.sendProgress(WorkDoneProgressType, params.workDoneToken, {
-			kind: 'begin',
-			title: 'Raven',
-			cancellable: false,
-			message: 'verifying',
-			percentage: 0
-		});
-	}
+type CompletedState = 'succeeded' | 'warnings' | 'failed' | 'unavailable';
+interface VerificationResult { diagnostics: Diagnostic[], state: CompletedState, message?: string }
+interface CheckResult { diagnostics: Diagnostic[], failed: boolean, unavailable?: string }
 
+connection.languages.diagnostics.on(async (params, token) => {
 	const document = documents.get(params.textDocument.uri);
-	let diagnostics: Diagnostic[] = [];
-	if (document !== undefined) {
-		const strict = pendingStrictChecks.get(document.uri);
-		pendingStrictChecks.delete(document.uri);
-		diagnostics = await validateTextDocument(document, strict);
-	}
+	if (!document) return { kind: DocumentDiagnosticReportKind.Full, items: [] } satisfies DocumentDiagnosticReport;
 
-	if (params.workDoneToken) {
-		connection.sendProgress(WorkDoneProgressType, params.workDoneToken, {
-			kind: 'end',
-			message: 'done'
+	const snapshot = TextDocument.create(document.uri, document.languageId, document.version, document.getText());
+	const runId = ++nextRunId;
+	activeRuns.set(snapshot.uri, runId);
+	const isCurrent = () => activeRuns.get(snapshot.uri) === runId
+		&& documents.get(snapshot.uri)?.version === snapshot.version && !token.isCancellationRequested;
+	const reportState = (state: 'running' | CompletedState, message?: string) => {
+		if (isCurrent()) connection.sendNotification('raven/verificationState', {
+			uri: snapshot.uri, version: snapshot.version, runId, state, message
 		});
+	};
+	const strict = pendingStrictChecks.get(snapshot.uri);
+	pendingStrictChecks.delete(snapshot.uri);
+	reportState('running');
+	if (params.workDoneToken) connection.sendProgress(WorkDoneProgressType, params.workDoneToken, {
+		kind: 'begin', title: 'Raven', cancellable: false, message: 'verifying', percentage: 0
+	});
+	try {
+		const result = await validateTextDocument(snapshot, strict, isCurrent);
+		if (!isCurrent()) throw new ResponseError(LSPErrorCodes.ServerCancelled, 'Verification superseded', { retriggerRequest: true });
+		reportState(result.state, result.message);
+		return { kind: DocumentDiagnosticReportKind.Full, items: result.diagnostics } satisfies DocumentDiagnosticReport;
+	} catch (error) {
+		reportState('unavailable', String(error));
+		throw error;
+	} finally {
+		if (params.workDoneToken) connection.sendProgress(WorkDoneProgressType, params.workDoneToken, { kind: 'end', message: 'done' });
 	}
-
-	return {
-		kind: DocumentDiagnosticReportKind.Full,
-		items: diagnostics
-	} satisfies DocumentDiagnosticReport;
 });
 
-async function validateTextDocument(textDocument: TextDocument, strictOverride?: boolean): Promise<Diagnostic[]> {
+async function validateTextDocument(textDocument: TextDocument, strictOverride: boolean | undefined, isCurrent: () => boolean): Promise<VerificationResult> {
 	const settings = await getDocumentSettings(textDocument.uri);
 	const strict = strictOverride ?? settings.strict;
+	const reportAnnotations = (contracts: InheritedContract[], modules: InheritedMembers[]) => {
+		if (isCurrent()) connection.sendNotification('raven/inheritedContracts', {
+			uri: textDocument.uri, version: textDocument.version, contracts, modules
+		});
+	};
+	const resultFor = (result: CheckResult): VerificationResult => ({
+		diagnostics: result.diagnostics,
+		state: result.unavailable !== undefined ? 'unavailable' : result.failed ? 'failed'
+			: result.diagnostics.some(d => d.code === 'strict') ? 'warnings' : 'succeeded',
+		message: result.unavailable
+	});
 
 	// Create temporary file from document
 	// Use vscode-uri to get the directory efficiently
@@ -331,8 +351,9 @@ async function validateTextDocument(textDocument: TextDocument, strictOverride?:
 	];
 	// Runs Raven with the [extra] arguments, reports the inherited contracts it finds to
 	// the client, and returns its diagnostics and whether it found errors.
-	const check = async (extra: string[]): Promise<{ diagnostics: Diagnostic[], failed: boolean }> => {
+	const check = async (extra: string[]): Promise<CheckResult> => {
 		let failed = false;
+		let unavailable: string | undefined;
 		const annotations: RavenAnnotation[] = [];
 
 		const diagnostics: Diagnostic[] = [];
@@ -345,27 +366,20 @@ async function validateTextDocument(textDocument: TextDocument, strictOverride?:
 
 			// No output = no problems found (and, before protocol 3, no annotations)
 			if (stdout == "") {
-				connection.sendNotification('raven/inheritedContracts', { uri: textDocument.uri, contracts: [], modules: [] });
+				if (protocol >= 3) throw new Error('Empty diagnostic response from Raven');
+				reportAnnotations([], []);
 				return { diagnostics, failed };
 			}
 
-			// Parse non-empty output
-			const parse = function (stdout: any) {
-				try {
-					return JSON.parse(stdout);
-				} catch (e) {
-					// Report internal error if output is invalid
-					return [{ kind: "Internal", file: tmpfile.name, message: ["Failed to parse output of Raven"], start_line: 1, start_col: 0, end_line: 1, end_col: 0 }];
-				}
+			const output = JSON.parse(stdout);
+			const errors: RavenError[] = Array.isArray(output) ? output : output.errors;
+			if (!Array.isArray(errors) || errors.some(e => typeof e.kind !== 'string'
+				|| typeof e.file !== 'string' || !Array.isArray(e.message)
+				|| !e.message.every(m => typeof m === 'string')
+				|| ![e.start_line, e.start_col, e.end_line, e.end_col].every(Number.isInteger))) {
+				throw new Error('Invalid diagnostic response from Raven');
 			}
-
-			// With --lsp-annotations, an object with the errors and the annotations;
-			// otherwise just the errors.
-			const output = parse(stdout);
-			const errors: RavenError[] = Array.isArray(output) ? output : (output.errors ?? []);
-			if (!Array.isArray(output)) {
-				annotations.push(...(output.annotations ?? []));
-			}
+			if (!Array.isArray(output)) annotations.push(...(output.annotations ?? []));
 			failed = errors.some(e => e.kind !== "RelatedLoc" && e.kind !== "Warning");
 
 			// Raven reports every location in whatever file it is really in: the temporary
@@ -509,10 +523,12 @@ async function validateTextDocument(textDocument: TextDocument, strictOverride?:
 					location: { uri: uriForError(m), range: rangeOf(m) }
 				}))
 			}));
-		connection.sendNotification('raven/inheritedContracts', { uri: textDocument.uri, contracts, modules });
+		reportAnnotations(contracts, modules);
 		} catch (error: any) {
+			unavailable = error.message ?? String(error);
+			failed = true;
 			connection.console.error(`Error executing Raven: ${error.message}`);
-			connection.sendNotification('raven/inheritedContracts', { uri: textDocument.uri, contracts: [], modules: [] });
+			reportAnnotations([], []);
 			// Optionally report a diagnostic if Raven fails to run
 			const diagnostic: Diagnostic = {
 				severity: DiagnosticSeverity.Warning,
@@ -520,12 +536,12 @@ async function validateTextDocument(textDocument: TextDocument, strictOverride?:
 					start: { line: 0, character: 0 },
 					end: { line: 0, character: 0 }
 				},
-				message: `Failed to execute the Raven verifier at '${executable}'. Error: ${error.message}`,
+				message: `Could not complete Raven verification using '${executable}': ${unavailable}`,
 				source: 'raven'
 			};
 			diagnostics.push(diagnostic);
 		}
-		return { diagnostics, failed };
+		return { diagnostics, failed, unavailable };
 	};
 
 	try {
@@ -534,12 +550,15 @@ async function validateTextDocument(textDocument: TextDocument, strictOverride?:
 		if (protocol >= 3) {
 			const typed = await check(["--typeonly"]);
 			if (typed.failed) {
-				return typed.diagnostics;
+				return resultFor(typed);
 			}
 		}
-		const result = (await check([])).diagnostics;
+		if (!isCurrent()) throw new ResponseError(LSPErrorCodes.ServerCancelled, 'Verification superseded', { retriggerRequest: true });
+		const result = resultFor(await check([]));
 		if (strict && protocol < 3) {
-			result.push({
+			result.state = 'unavailable';
+			result.message = 'Strict-mode diagnostics require a Raven verifier supporting LSP protocol 3 or later.';
+			result.diagnostics.push({
 				severity: DiagnosticSeverity.Warning,
 				range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
 				message: 'Strict-mode diagnostics require a newer Raven verifier (LSP protocol 3 or later). Update the verifier to enable them.',

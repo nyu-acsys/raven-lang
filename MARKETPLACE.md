@@ -32,6 +32,8 @@ code --install-extension nyu-acsys.raven-verifier
 * **Verification**: Verification runs automatically as you edit — no need to save first.
 * **Manual Verification**: Run **Raven: Verify File** from the Command Palette, or press `Cmd+Shift+R` (Mac) or `Alt+Shift+R` (Windows/Linux) when editing a `.rav` file.
 
+The status bar tracks the active file and its current version. Messages use the **Raven:** prefix: grey for not checked or outdated results, blue while verifying, green when verified, yellow when verified with strict warnings, red for errors, and orange when verification is unavailable. Editing a file invalidates its previous result; results from older versions or superseded checks cannot replace the current state.
+
 ### Strict verification
 
 Set `ravenServer.strict` to `true` to enable strict mode for automatic verification and **Raven: Verify File**. It defaults to `false` and can be set per workspace or folder:
@@ -44,7 +46,7 @@ Set `ravenServer.strict` to `true` to enable strict mode for automatic verificat
 
 For a single strict check, run **Raven: Verify File in Strict Mode** from the Command Palette. This checks the active file regardless of the setting and leaves it unchanged; subsequent checks use the configured mode.
 
-Strict warnings appear in the editor and Problems panel. Verification can succeed with warnings: the success indicator turns yellow, with a tooltip explaining why. Verification errors still show a red failure indicator.
+Strict warnings appear in the editor and Problems panel. Verification can succeed with warnings: the status reads **Raven: Verified with warnings** in yellow, with a tooltip explaining why. Verification errors still show a red failure indicator.
 
 Strict-mode diagnostics and inherited-contract displays require a Raven verifier supporting LSP protocol 3 or later. An older verifier reports that strict-mode diagnostics are unavailable; use **Raven: Update Verifier** to check for a compatible update.
 

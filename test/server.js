@@ -23,6 +23,10 @@ fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + '\\n');
 const file = args[args.length - 1];
 const text = fs.readFileSync(file, 'utf8');
 const location = { file, start_line: 2, start_col: 1, end_line: 2, end_col: 5 };
+if (text.includes('CRASH') && (!text.includes('VERIFY_CRASH') || !args.includes('--typeonly'))) process.exit(2);
+if (text.includes('BAD_JSON')) { console.log('invalid JSON'); process.exit(0); }
+if (text.includes('BAD_PAYLOAD')) { console.log('{}'); process.exit(0); }
+if (text.includes('EMPTY_RESPONSE')) process.exit(0);
 const errors = [];
 if (args.includes('--strict')) errors.push({ ...location, kind: 'Warning', message: ['Assumed termination'] });
 if (text.includes('VERIFY_ERROR') && !args.includes('--typeonly')) errors.push({ ...location, kind: 'Verification', message: ['Assertion failed'] });
@@ -38,13 +42,17 @@ if (text.includes('RELATED_ERROR') && !args.includes('--typeonly')) {
 	if (args.includes('--strict')) errors.push({ ...location, kind: 'Warning', message: ['Third assumption'] });
 	errors.push(related('Included assertion', 7, included));
 }
-console.log(JSON.stringify(args.includes('--lsp-annotations') ? { errors, annotations: [] } : errors));
+const emit = () => console.log(JSON.stringify(args.includes('--lsp-annotations') ? { errors, annotations: [] } : errors));
+if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 `, { mode: 0o755 });
 	const server = spawn(process.execPath, [path.join(__dirname, '../server/out/server.js'), '--stdio']);
 	let nextId = 1;
 	let buffer = Buffer.alloc(0);
 	const pending = new Map();
 	const refreshes = [];
+	const stateUpdates = [];
+	const annotations = [];
+	const stateWaiters = [];
 	const settings = new Map();
 	const uri = pathToFileURL(path.join(dir, 'sample.rav')).toString();
 	const otherUri = pathToFileURL(path.join(dir, 'other.rav')).toString();
@@ -77,6 +85,17 @@ console.log(JSON.stringify(args.includes('--lsp-annotations') ? { errors, annota
 					refreshes.shift()?.();
 				}
 				send({ id: message.id, result });
+			} else if (message.method === 'raven/verificationState') {
+				stateUpdates.push(message.params);
+				for (const waiter of [...stateWaiters]) {
+					if (waiter.uri === message.params.uri && waiter.state === message.params.state) {
+						stateWaiters.splice(stateWaiters.indexOf(waiter), 1);
+						clearTimeout(waiter.timer);
+						waiter.resolve(message.params);
+					}
+				}
+			} else if (message.method === 'raven/inheritedContracts') {
+				annotations.push(message.params);
 			} else if (!message.method && pending.has(message.id)) {
 				const { resolve, reject, timer } = pending.get(message.id);
 				pending.delete(message.id);
@@ -89,7 +108,21 @@ console.log(JSON.stringify(args.includes('--lsp-annotations') ? { errors, annota
 	let stderr = '';
 	server.stderr.on('data', data => { stderr += data; });
 	const calls = () => fs.readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse);
-	const diagnostics = async (resource = uri) => (await request('textDocument/diagnostic', { textDocument: { uri: resource } })).items;
+	const diagnostics = async (resource = uri) => {
+		const start = stateUpdates.length;
+		const response = await request('textDocument/diagnostic', { textDocument: { uri: resource } });
+		const updates = stateUpdates.slice(start).filter(update => update.uri === resource);
+		assert.strictEqual(updates.length, 2);
+		assert.strictEqual(updates[0].state, 'running');
+		assert.notStrictEqual(updates[1].state, 'running');
+		assert.strictEqual(updates[0].runId, updates[1].runId);
+		assert.strictEqual(updates[0].version, updates[1].version);
+		return response.items;
+	};
+	const waitForState = (uri, state) => new Promise((resolve, reject) => {
+		const timer = setTimeout(() => reject(new Error(`No ${state} state for ${uri}`)), 10000);
+		stateWaiters.push({ uri, state, resolve, timer });
+	});
 	try {
 		await request('initialize', {
 			processId: process.pid,
@@ -100,6 +133,7 @@ console.log(JSON.stringify(args.includes('--lsp-annotations') ? { errors, annota
 		send({ method: 'textDocument/didOpen', params: { textDocument: { uri, languageId: 'raven', version: 1, text: 'program' } } });
 		assert.deepStrictEqual(await diagnostics(), []);
 		assert.strictEqual(calls().length, 2);
+		assert.strictEqual(stateUpdates.at(-1).state, 'succeeded');
 		assert(calls().every(args => !args.includes('--strict')));
 		console.log('  ok   strict mode defaults off');
 
@@ -113,6 +147,7 @@ console.log(JSON.stringify(args.includes('--lsp-annotations') ? { errors, annota
 		await refreshed;
 		const warnings = await diagnostics();
 		assert.strictEqual(warnings.length, 1);
+		assert.strictEqual(stateUpdates.at(-1).state, 'warnings');
 		assert.strictEqual(warnings[0].severity, 2);
 		assert.strictEqual(warnings[0].code, 'strict');
 		assert.deepStrictEqual(warnings[0].range, { start: { line: 1, character: 1 }, end: { line: 1, character: 5 } });
@@ -129,12 +164,14 @@ console.log(JSON.stringify(args.includes('--lsp-annotations') ? { errors, annota
 
 		send({ method: 'textDocument/didChange', params: { textDocument: { uri, version: 2 }, contentChanges: [{ text: 'VERIFY_ERROR' }] } });
 		assert.deepStrictEqual((await diagnostics()).map(d => d.severity), [2, 1]);
+		assert.strictEqual(stateUpdates.at(-1).state, 'failed');
 		console.log('  ok   warnings coexist with verification failures');
 
 		send({ method: 'textDocument/didChange', params: { textDocument: { uri, version: 3 }, contentChanges: [{ text: 'TYPE_ERROR' }] } });
 		const count = calls().length;
 		assert.deepStrictEqual((await diagnostics()).map(d => d.severity), [2, 1]);
 		assert.strictEqual(calls().length, count + 1);
+		assert.strictEqual(stateUpdates.at(-1).state, 'failed');
 		console.log('  ok   type errors still stop before verification');
 
 		send({ method: 'textDocument/didChange', params: { textDocument: { uri, version: 4 }, contentChanges: [{ text: 'program' }] } });
@@ -142,6 +179,7 @@ console.log(JSON.stringify(args.includes('--lsp-annotations') ? { errors, annota
 		const legacyStart = calls().length;
 		const legacy = await diagnostics();
 		assert.strictEqual(legacy.length, 1);
+		assert.strictEqual(stateUpdates.at(-1).state, 'unavailable');
 		assert.strictEqual(legacy[0].severity, 2);
 		assert.match(legacy[0].message, /newer Raven verifier/);
 		assert.strictEqual(calls().length, legacyStart + 1);
@@ -202,12 +240,53 @@ console.log(JSON.stringify(args.includes('--lsp-annotations') ? { errors, annota
 			assert.deepStrictEqual(items.filter(d => d.severity === 3).map(d => d.range.start.line), [2, 4]);
 			console.log(`  ok   leading and trailing related locations belong to the error with strict mode ${strict ? 'on' : 'off'}`);
 		}
+		for (const text of ['CRASH', 'VERIFY_CRASH', 'BAD_JSON', 'BAD_PAYLOAD', 'EMPTY_RESPONSE']) {
+			const resource = pathToFileURL(path.join(dir, `${text}.rav`)).toString();
+			send({ method: 'textDocument/didOpen', params: { textDocument: { uri: resource, languageId: 'raven', version: 1, text } } });
+			const before = calls().length;
+			assert.strictEqual((await diagnostics(resource)).length, 1);
+			assert.strictEqual(calls().length, before + (text === 'VERIFY_CRASH' ? 2 : 1));
+			assert.strictEqual(stateUpdates.at(-1).state, 'unavailable');
+			assert(stateUpdates.at(-1).message);
+		}
+		console.log('  ok   crashes and invalid responses report unavailable without retrying verification');
+
+		send({ method: 'raven/executable', params: { executable: path.join(dir, 'missing-verifier'), lspProtocol: 3 } });
+		const beforeMissing = calls().length;
+		assert.strictEqual((await diagnostics()).length, 1);
+		assert.strictEqual(calls().length, beforeMissing);
+		assert.strictEqual(stateUpdates.at(-1).state, 'unavailable');
+		send({ method: 'raven/executable', params: { executable, lspProtocol: 3 } });
+		console.log('  ok   a missing executable cannot produce a success state');
+
+		const resource = pathToFileURL(path.join(dir, 'overlap.rav')).toString();
+		for (const changeVersion of [true, false]) {
+			send({ method: 'textDocument/didOpen', params: { textDocument: { uri: resource, languageId: 'raven', version: 1, text: 'SLOW' } } });
+			const running = waitForState(resource, 'running');
+			const oldResult = request('textDocument/diagnostic', { textDocument: { uri: resource } }).then(
+				() => { throw new Error('Obsolete verification returned diagnostics'); }, error => error);
+			const oldRun = await running;
+			if (changeVersion) send({ method: 'textDocument/didChange', params: { textDocument: { uri: resource, version: 2 }, contentChanges: [{ text: 'program' }] } });
+			const fresh = await request('textDocument/diagnostic', { textDocument: { uri: resource } });
+			assert.deepStrictEqual(fresh.items, []);
+			assert.match((await oldResult).message, /Verification superseded/);
+			assert.deepStrictEqual(stateUpdates.filter(update => update.runId === oldRun.runId).map(update => update.state), ['running']);
+			const latest = stateUpdates.at(-1);
+			assert.strictEqual(latest.uri, resource);
+			assert.strictEqual(latest.version, changeVersion ? 2 : 1);
+			assert.strictEqual(latest.state, 'succeeded');
+			assert(latest.runId > oldRun.runId);
+			if (changeVersion) assert(annotations.filter(a => a.uri === resource).every(a => a.version === 2));
+			send({ method: 'textDocument/didClose', params: { textDocument: { uri: resource } } });
+		}
+		console.log('  ok   obsolete versions and superseded runs cannot publish final state or diagnostics');
 		assert.strictEqual(stderr, '');
 		await request('shutdown', null);
 		send({ method: 'exit' });
 	} finally {
 		server.kill();
 		for (const { timer } of pending.values()) clearTimeout(timer);
+		for (const { timer } of stateWaiters) clearTimeout(timer);
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
 }
