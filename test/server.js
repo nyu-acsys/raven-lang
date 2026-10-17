@@ -71,7 +71,11 @@ const members = text.includes('MEMBERS') && !args.includes('--typeonly') ? [
 	{ ...location, name: 'M.p', kind: 'proc', status: 'verified' },
 	{ ...location, file: 'other.rav', name: 'q', kind: 'lemma', status: 'failed' }
 ] : [];
-const emit = () => console.log(JSON.stringify(args.includes('--lsp-annotations') ? { errors, annotations: [], members, dependencies: [...dependencies] } : errors));
+const symbols = text.includes('SYMBOLS') ? {
+	references: [{ line: 1, start_col: 0, end_col: 7, symbol: 0 }],
+	symbols: [{ name: 'M.SYMBOLS', kind: 'function', detail: 'func SYMBOLS()', definition: { ...location, start_line: 1, end_line: 1, end_col: 7 } }]
+} : {};
+const emit = () => console.log(JSON.stringify(args.includes('--lsp-annotations') ? { errors, annotations: [], members, ...symbols, dependencies: [...dependencies] } : errors));
 if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 `, { mode: 0o755 });
 	const server = spawn(process.execPath, [path.join(__dirname, '../server/out/server.js'), '--stdio']);
@@ -167,11 +171,13 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 		stateWaiters.push({ uri, state, resolve, timer });
 	});
 	try {
-		await request('initialize', {
+		const initialized = await request('initialize', {
 			processId: process.pid,
 			initializationOptions: { raven: { executable } },
 			capabilities: { workspace: { configuration: true }, textDocument: { diagnostic: {}, publishDiagnostics: { relatedInformation: true } } }
 		});
+		assert.strictEqual(initialized.capabilities.hoverProvider, true);
+		assert.strictEqual(initialized.capabilities.definitionProvider, true);
 		send({ method: 'initialized', params: {} });
 		send({ method: 'textDocument/didOpen', params: { textDocument: { uri, languageId: 'raven', version: 1, text: 'program' } } });
 		const initialRunning = waitForState(uri, 'running');
@@ -364,6 +370,23 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 		assert(calls().slice(-2).every(args => args[args.indexOf('--smt-timeout') + 1] === '2500'));
 		send({ method: 'textDocument/didClose', params: { textDocument: { uri: timeoutUri } } });
 		console.log('  ok   the SMT timeout is passed to the verifier');
+
+		const symbolsUri = pathToFileURL(path.join(dir, 'symbols.rav')).toString();
+		send({ method: 'textDocument/didOpen', params: { textDocument: { uri: symbolsUri, languageId: 'raven', version: 1, text: 'SYMBOLS' } } });
+		assert.deepStrictEqual(await diagnostics(symbolsUri), []);
+		const position = { textDocument: { uri: symbolsUri }, position: { line: 0, character: 3 } };
+		const hover = await request('textDocument/hover', position);
+		assert.match(hover.contents.value, /func SYMBOLS\(\)/);
+		assert.deepStrictEqual(await request('textDocument/definition', position), {
+			uri: symbolsUri, range: { start: { line: 0, character: 1 }, end: { line: 0, character: 7 } }
+		});
+		send({ method: 'textDocument/didChange', params: { textDocument: { uri: symbolsUri, version: 2 }, contentChanges: [{ text: '\nSYMBOLS' }] } });
+		assert.match((await request('textDocument/hover', { ...position, position: { line: 1, character: 3 } })).contents.value, /SYMBOLS/);
+		send({ method: 'textDocument/didClose', params: { textDocument: { uri: symbolsUri } } });
+		send({ method: 'textDocument/didOpen', params: { textDocument: { uri: symbolsUri, languageId: 'raven', version: 1, text: 'SYMBOLS' } } });
+		assert.strictEqual(await request('textDocument/hover', position), null);
+		send({ method: 'textDocument/didClose', params: { textDocument: { uri: symbolsUri } } });
+		console.log('  ok   hovers and definitions come from the names of the latest check, and closing forgets them');
 
 		const membersUri = pathToFileURL(path.join(dir, 'members.rav')).toString();
 		send({ method: 'textDocument/didOpen', params: { textDocument: { uri: membersUri, languageId: 'raven', version: 1, text: 'MEMBERS' } } });

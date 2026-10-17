@@ -29,6 +29,7 @@ import {
 } from 'vscode-languageserver-textdocument';
 import { URI, Utils } from 'vscode-uri';
 import { VerificationProcesses } from './verificationProcesses';
+import { SymbolTable, definitionAt, hoverAt } from './symbols';
 import { match } from "ts-pattern";
 import * as tmp from 'tmp';
 import * as fs from "fs";
@@ -118,6 +119,9 @@ connection.onInitialize((params: InitializeParams) => {
 	const result: InitializeResult = {
 		capabilities: {
 			textDocumentSync: TextDocumentSyncKind.Full,
+			// Answered from the names Raven reports (protocol 4); see symbols.ts.
+			hoverProvider: true,
+			definitionProvider: true,
 			diagnosticProvider: {
 				interFileDependencies: true,
 				workspaceDiagnostics: false
@@ -259,6 +263,7 @@ let nextRunId = 0;
 
 // Only keep settings for open documents
 documents.onDidClose(e => {
+	symbolTables.delete(e.document.uri);
 	documentSettings.delete(e.document.uri);
 	documentDependencies.delete(e.document.uri);
 	completedResults.delete(e.document.uri);
@@ -298,6 +303,26 @@ interface RavenAnnotation extends RavenLocation {
 	clauses: (RavenLocation & { keyword: string, text: string })[],
 	members: (RavenLocation & { origin: string, text: string })[]
 }
+
+/** The names each open document uses, from its latest check (protocol 4). */
+const symbolTables = new Map<string, SymbolTable>();
+
+connection.onHover(params => {
+	const table = symbolTables.get(params.textDocument.uri);
+	const document = documents.get(params.textDocument.uri);
+	return table && document ? hoverAt(table, document.getText(), params.position) ?? null : null;
+});
+
+connection.onDefinition(params => {
+	const table = symbolTables.get(params.textDocument.uri);
+	const document = documents.get(params.textDocument.uri);
+	return table && document
+		? definitionAt(table, document.uri, document.getText(), params.position) ?? null : null;
+});
+
+/** A use of a name, in the document Raven checked, and a symbol it refers to (protocol 4). */
+interface RavenReference { line: number, start_col: number, end_col: number, symbol: number }
+interface RavenSymbol { name: string, kind: string, definition: RavenLocation, detail?: string }
 
 /**
  * The verification status of a member (protocol 4). A module or interface has the worst
@@ -656,6 +681,22 @@ async function validateTextDocument(
 					location: { uri: uriForError(m), range: rangeOf(m) }
 				}))
 			}));
+		if (!Array.isArray(output) && Array.isArray(output.references) && Array.isArray(output.symbols)) {
+			const references: RavenReference[] = output.references;
+			const symbols: RavenSymbol[] = output.symbols;
+			if (isCurrent()) symbolTables.set(textDocument.uri, {
+				version: textDocument.version,
+				lines: textDocument.getText().split('\n'),
+				references: references.map(r => ({
+					range: rangeOf({ start_line: r.line, start_col: r.start_col, end_line: r.line, end_col: r.end_col }),
+					symbol: r.symbol
+				})),
+				symbols: symbols.map(s => ({
+					name: s.name, kind: s.kind, detail: s.detail,
+					location: { uri: uriForError(s.definition), range: rangeOf(s.definition) }
+				}))
+			});
+		}
 		const members: MemberStatus[] = memberStatuses
 			.filter(m => uriForError(m) === textDocument.uri)
 			.map(m => ({
