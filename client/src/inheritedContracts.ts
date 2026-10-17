@@ -4,7 +4,9 @@
  * each such member shows its contract on one line and opens the interface's member, which
  * its tooltip names, and hovering over the member's name shows the contract in full.
  * Hovering over the name of a module shows the members it inherits rather than declaring
- * them itself, with headers and contracts but not bodies.
+ * them itself, with headers and contracts but not bodies. The same notification carries
+ * the verification status of each member, which a code lens above it shows; above a
+ * module, it counts the statuses of the members nested in it.
  * ------------------------------------------------------------------------------------------ */
 
 import * as vscode from 'vscode';
@@ -26,12 +28,65 @@ interface InheritedMembers {
 	members: { origin: string, text: string, location: Location }[]
 }
 
+interface MemberStatus {
+	range: vscode.Range,
+	name: string,
+	kind: string,
+	status: string,
+	/** For a module or interface: how many of its members have each status. */
+	counts?: Record<string, number>,
+	/** Whether a module inherits it; it is then located at the module. */
+	inherited?: boolean
+}
+
 interface InheritedAnnotations {
 	uri: string,
 	version: number,
 	runId: number,
 	contracts: InheritedContract[],
-	modules?: InheritedMembers[]
+	modules?: InheritedMembers[],
+	members?: MemberStatus[]
+}
+
+/** The title and tooltip of the code lens for each status. */
+const STATUS_LENSES: Record<string, { title: string, tooltip: string }> = {
+	verified: { title: '✓ verified', tooltip: 'Raven verified this {kind}.' },
+	failed: { title: '✗ failed', tooltip: 'Raven could not verify this {kind}; see its errors.' },
+	timeout: { title: '⏱ timed out', tooltip: 'The solver timed out on this {kind}.' },
+	skipped: { title: '– skipped', tooltip: 'Raven stopped before checking this {kind}, after reaching the error limit.' }
+};
+
+/** The words for each status in a module's summary, worst first. */
+const SUMMARY_WORDS: [string, string][] = [
+	['failed', 'failed'], ['timeout', 'timed out'], ['skipped', 'skipped'], ['verified', 'verified']
+];
+
+/**
+ * The code lens showing the status of [member], if it has a known status. A module's lists
+ * the members it inherits from [members], which have no code lens of their own.
+ */
+function statusLens(member: MemberStatus, members: MemberStatus[]): vscode.CodeLens | undefined {
+	const lens = STATUS_LENSES[member.status];
+	if (!lens || member.inherited) return undefined;
+	if (member.counts) {
+		const counts = member.counts;
+		const parts = SUMMARY_WORDS.filter(([status]) => counts[status] > 0)
+			.map(([status, words]) => `${counts[status]} ${words}`);
+		const inherited = members
+			.filter(m => m.inherited && m.name.startsWith(`${member.name}.`))
+			.map(m => `\n${STATUS_LENSES[m.status]?.title ?? m.status}: ${m.kind} ${m.name.slice(member.name.length + 1)}`);
+		return new vscode.CodeLens(toRange(member.range), {
+			title: `${lens.title.split(' ')[0]} ${parts.join(', ')}`,
+			tooltip: `The verification status of the members of ${member.kind} ${member.name}.`
+				+ (inherited.length > 0 ? `\nInherited:${inherited.join('')}` : ''),
+			command: ''
+		});
+	}
+	return new vscode.CodeLens(toRange(member.range), {
+		title: lens.title,
+		tooltip: `${member.name}: ${lens.tooltip.replace('{kind}', member.kind)}`,
+		command: ''
+	});
 }
 
 /** How many characters of the contract a code lens shows before shortening it. */
@@ -135,7 +190,11 @@ export function registerInheritedContracts(context: vscode.ExtensionContext, cli
 	context.subscriptions.push(vscode.languages.registerCodeLensProvider({ language: 'raven' }, {
 		onDidChangeCodeLenses: lensesChanged.event,
 		provideCodeLenses(document) {
-			return (currentAnnotations(document)?.contracts ?? []).map(contract =>
+			const current = currentAnnotations(document);
+			const members = current?.members ?? [];
+			const statuses = members.map(member => statusLens(member, members))
+				.filter((lens): lens is vscode.CodeLens => lens !== undefined);
+			return statuses.concat((current?.contracts ?? []).map(contract =>
 				new vscode.CodeLens(toRange(contract.range), {
 					title: `inherited: ${summary(contract)}`,
 					tooltip: `Contract inherited from ${contract.source}. Click to open it.`,
@@ -144,7 +203,7 @@ export function registerInheritedContracts(context: vscode.ExtensionContext, cli
 						vscode.Uri.parse(contract.sourceLocation.uri),
 						{ selection: toRange(contract.sourceLocation.range) }
 					]
-				}));
+				})));
 		}
 	}));
 

@@ -296,6 +296,21 @@ interface RavenAnnotation extends RavenLocation {
 	members: (RavenLocation & { origin: string, text: string })[]
 }
 
+/**
+ * The verification status of a member (protocol 4). A module or interface has the worst
+ * status of its members, and counts how many have each status. A member that a module
+ * inherits, such as a lemma for an axiom of its interface, is located at the module.
+ */
+interface RavenMemberStatus extends RavenLocation {
+	name: string, kind: string, status: string, counts?: Record<string, number>, inherited?: boolean
+}
+
+/** What the client shows above a member that was verified. */
+interface MemberStatus {
+	range: Range, name: string, kind: string, status: string, counts?: Record<string, number>,
+	inherited?: boolean
+}
+
 /** What the client shows for a module that inherits members. */
 interface InheritedMembers {
 	range: Range,
@@ -392,9 +407,9 @@ async function validateTextDocument(
 ): Promise<VerificationResult> {
 	const settings = await getDocumentSettings(textDocument.uri);
 	const strict = strictOverride ?? settings.strict;
-	const reportAnnotations = (contracts: InheritedContract[], modules: InheritedMembers[]) => {
+	const reportAnnotations = (contracts: InheritedContract[], modules: InheritedMembers[], members: MemberStatus[] = []) => {
 		if (isCurrent()) connection.sendNotification('raven/inheritedContracts', {
-			uri: textDocument.uri, version: textDocument.version, runId, contracts, modules
+			uri: textDocument.uri, version: textDocument.version, runId, contracts, modules, members
 		});
 	};
 	const resultFor = (result: CheckResult): VerificationResult => ({
@@ -450,6 +465,7 @@ async function validateTextDocument(
 		let failed = false;
 		let unavailable: string | undefined;
 		const annotations: RavenAnnotation[] = [];
+		const memberStatuses: RavenMemberStatus[] = [];
 
 		const diagnostics: Diagnostic[] = [];
 
@@ -480,6 +496,7 @@ async function validateTextDocument(
 			}
 			reportDependencies(dependencies?.map((file: string) => URI.file(path.resolve(dir, file)).toString()));
 			if (!Array.isArray(output)) annotations.push(...(output.annotations ?? []));
+			if (!Array.isArray(output)) memberStatuses.push(...(output.members ?? []));
 			failed = errors.some(e => e.kind !== "RelatedLoc" && e.kind !== "Warning" && e.kind !== "Limit");
 
 			// Raven reports every location in whatever file it is really in: the temporary
@@ -631,7 +648,13 @@ async function validateTextDocument(
 					location: { uri: uriForError(m), range: rangeOf(m) }
 				}))
 			}));
-		reportAnnotations(contracts, modules);
+		const members: MemberStatus[] = memberStatuses
+			.filter(m => uriForError(m) === textDocument.uri)
+			.map(m => ({
+				range: rangeOf(m), name: m.name, kind: m.kind, status: m.status, counts: m.counts,
+				inherited: m.inherited
+			}));
+		reportAnnotations(contracts, modules, members);
 		} catch (error) {
 			if (signal.aborted) throw error;
 			unavailable = error instanceof Error ? error.message : String(error);

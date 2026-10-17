@@ -14,6 +14,7 @@ New to Raven? **[nyu-acsys.github.io/raven](https://nyu-acsys.github.io/raven/)*
 - **Strict Mode**: Warn about assumed termination, explicit `free` declarations and physically atomic blocks, with a yellow success indicator when warnings are present.
 - **Diagnostics**: Errors and warnings shown in the editor and Problems panel, with related locations and optional gutter icons.
 - **Inherited Contracts**: View inherited contracts above callable headers and on hover, and inherited module members on hover.
+- **Verification Status**: See above each procedure, lemma, function and module whether it verified, failed or timed out.
 
 ## Prerequisites
 

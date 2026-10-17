@@ -114,6 +114,28 @@ try {
 	assert(hover(opensDocument, 0).contents.value.includes('opens {}'));
 	console.log('  ok   opens-only inherited contracts appear in code lenses and hovers');
 
+	const statusDocument = open('status');
+	start(statusDocument, 1);
+	emit('raven/inheritedContracts', {
+		uri: statusDocument.uri.toString(), version: statusDocument.version, runId: 1, contracts: [],
+		members: ['verified', 'failed', 'timeout', 'skipped', 'unknown'].map((status, line) =>
+			({ range: range(line), name: `p${line}`, kind: 'proc', status }))
+	});
+	assert.deepStrictEqual(lenses(statusDocument).map(lens => lens.command.title),
+		['✓ verified', '✗ failed', '⏱ timed out', '– skipped']);
+	assert(lenses(statusDocument)[1].command.tooltip.startsWith('p1: Raven could not verify this proc'));
+	emit('raven/inheritedContracts', {
+		uri: statusDocument.uri.toString(), version: statusDocument.version, runId: 1, contracts: [],
+		members: [
+			{ range: range(0), name: 'M', kind: 'module', status: 'failed', counts: { verified: 9, timeout: 1, failed: 2 } },
+			{ range: range(0), name: 'M.compCommute', kind: 'lemma', status: 'failed', inherited: true }
+		]
+	});
+	assert.deepStrictEqual(lenses(statusDocument).map(lens => lens.command.title),
+		['✗ 2 failed, 1 timed out, 9 verified']);
+	assert(lenses(statusDocument)[0].command.tooltip.endsWith('Inherited:\n✗ failed: lemma compCommute'));
+	console.log('  ok   code lenses show the status of members, ignoring unknown ones, and summarize modules');
+
 	let refreshes = 0;
 	context.subscriptions.push(providers.lenses.onDidChangeCodeLenses(() => refreshes++));
 	let document = open('main');

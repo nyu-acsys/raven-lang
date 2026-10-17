@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Code lenses show the verification status of each member and module (LSP protocol 4).
+
 ### Changed
 
 - `ravenServer.maxNumberOfProblems` limits the errors Raven reports (LSP protocol 4).

@@ -67,7 +67,11 @@ if ((text.includes('BLOCK_TYPE') && args.includes('--typeonly'))
 	setInterval(() => {}, 1000);
 	return;
 }
-const emit = () => console.log(JSON.stringify(args.includes('--lsp-annotations') ? { errors, annotations: [], dependencies: [...dependencies] } : errors));
+const members = text.includes('MEMBERS') && !args.includes('--typeonly') ? [
+	{ ...location, name: 'M.p', kind: 'proc', status: 'verified' },
+	{ ...location, file: 'other.rav', name: 'q', kind: 'lemma', status: 'failed' }
+] : [];
+const emit = () => console.log(JSON.stringify(args.includes('--lsp-annotations') ? { errors, annotations: [], members, dependencies: [...dependencies] } : errors));
 if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 `, { mode: 0o755 });
 	const server = spawn(process.execPath, [path.join(__dirname, '../server/out/server.js'), '--stdio']);
@@ -352,6 +356,19 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 		send({ method: 'textDocument/didClose', params: { textDocument: { uri: limitUri } } });
 		send({ method: 'raven/executable', params: { executable, lspProtocol: 3 } });
 		console.log('  ok   the limit on problems is passed to verifiers supporting protocol 4 only, and its note names the setting');
+
+		const membersUri = pathToFileURL(path.join(dir, 'members.rav')).toString();
+		send({ method: 'textDocument/didOpen', params: { textDocument: { uri: membersUri, languageId: 'raven', version: 1, text: 'MEMBERS' } } });
+		const annotationStart = annotations.length;
+		assert.deepStrictEqual(await diagnostics(membersUri), []);
+		const reported = annotations.slice(annotationStart).filter(a => a.uri === membersUri);
+		assert.deepStrictEqual(reported.map(a => a.members.length), [0, 1]);
+		assert.deepStrictEqual(reported[1].members[0], {
+			range: { start: { line: 1, character: 1 }, end: { line: 1, character: 5 } },
+			name: 'M.p', kind: 'proc', status: 'verified'
+		});
+		send({ method: 'textDocument/didClose', params: { textDocument: { uri: membersUri } } });
+		console.log('  ok   the status of the members of the checked document reaches the client');
 
 		const resource = pathToFileURL(path.join(dir, 'overlap.rav')).toString();
 		for (const changeVersion of [true, false]) {
