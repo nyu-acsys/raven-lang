@@ -156,11 +156,14 @@ const LIBRARY_SCHEME = 'raven-stdlib';
 interface ServerSettings {
 	strict: boolean;
 	maxNumberOfProblems: number;
+	smtTimeout: number;
 	highlightRelatedLocations: boolean;
 }
 
 // The global settings, used when the `workspace/configuration` request is not supported by the client.
-const defaultSettings: ServerSettings = { strict: false, maxNumberOfProblems: 100, highlightRelatedLocations: true };
+const defaultSettings: ServerSettings = {
+	strict: false, maxNumberOfProblems: 100, smtTimeout: 10000, highlightRelatedLocations: true
+};
 let globalSettings: ServerSettings = defaultSettings;
 
 // Cache the settings of all open documents
@@ -450,6 +453,10 @@ async function validateTextDocument(
 	const maxErrors = settings.maxNumberOfProblems;
 	const maxErrorsArgs = protocol >= 4 && Number.isInteger(maxErrors) && maxErrors >= 0
 		? ["--max-errors", String(maxErrors)] : [];
+	// Every Raven release accepts the solver's time limit.
+	const smtTimeout = settings.smtTimeout;
+	const smtTimeoutArgs = Number.isInteger(smtTimeout) && smtTimeout > 0
+		? ["--smt-timeout", String(smtTimeout)] : [];
 	const argsWith = (extra: string[]) => [
 		"--lsp-mode", "-q", ...extra,
 		...(strict && protocol >= 3 ? ["--strict"] : []),
@@ -457,6 +464,7 @@ async function validateTextDocument(
 		...(protocol >= 3 ? ["--lsp-annotations"] : []),
 		...(protocol >= 2 ? ["--extension", "auto"] : []),
 		...maxErrorsArgs,
+		...smtTimeoutArgs,
 		"--base-dir", dir, tmpfile.name
 	];
 	// Runs Raven with the [extra] arguments, reports the inherited contracts it finds to

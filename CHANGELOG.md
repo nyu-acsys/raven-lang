@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Code lenses show the verification status of each member and module (LSP protocol 4).
+- `ravenServer.smtTimeout` sets the time limit of the SMT solver.
 
 ### Changed
 

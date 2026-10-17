@@ -52,7 +52,7 @@ interface InheritedAnnotations {
 const STATUS_LENSES: Record<string, { title: string, tooltip: string }> = {
 	verified: { title: '✓ verified', tooltip: 'Raven verified this {kind}.' },
 	failed: { title: '✗ failed', tooltip: 'Raven could not verify this {kind}; see its errors.' },
-	timeout: { title: '⏱ timed out', tooltip: 'The solver timed out on this {kind}.' },
+	timeout: { title: '⏱ timed out', tooltip: 'The solver timed out on this {kind}; ravenServer.smtTimeout sets its time limit.' },
 	skipped: { title: '– skipped', tooltip: 'Raven stopped before checking this {kind}, after reaching the error limit.' }
 };
 

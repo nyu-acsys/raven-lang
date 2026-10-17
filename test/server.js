@@ -87,7 +87,7 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 	const settings = new Map();
 	const uri = pathToFileURL(path.join(dir, 'sample.rav')).toString();
 	const otherUri = pathToFileURL(path.join(dir, 'other.rav')).toString();
-	const defaultSettings = { strict: false, maxNumberOfProblems: 100, highlightRelatedLocations: true };
+	const defaultSettings = { strict: false, maxNumberOfProblems: 100, smtTimeout: 10000, highlightRelatedLocations: true };
 	const send = message => {
 		const body = Buffer.from(JSON.stringify({ jsonrpc: '2.0', ...message }));
 		server.stdin.write(`Content-Length: ${body.length}\r\n\r\n`);
@@ -356,6 +356,14 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 		send({ method: 'textDocument/didClose', params: { textDocument: { uri: limitUri } } });
 		send({ method: 'raven/executable', params: { executable, lspProtocol: 3 } });
 		console.log('  ok   the limit on problems is passed to verifiers supporting protocol 4 only, and its note names the setting');
+
+		const timeoutUri = pathToFileURL(path.join(dir, 'timeout.rav')).toString();
+		settings.set(timeoutUri, { ...defaultSettings, smtTimeout: 2500 });
+		send({ method: 'textDocument/didOpen', params: { textDocument: { uri: timeoutUri, languageId: 'raven', version: 1, text: 'program' } } });
+		assert.deepStrictEqual(await diagnostics(timeoutUri), []);
+		assert(calls().slice(-2).every(args => args[args.indexOf('--smt-timeout') + 1] === '2500'));
+		send({ method: 'textDocument/didClose', params: { textDocument: { uri: timeoutUri } } });
+		console.log('  ok   the SMT timeout is passed to the verifier');
 
 		const membersUri = pathToFileURL(path.join(dir, 'members.rav')).toString();
 		send({ method: 'textDocument/didOpen', params: { textDocument: { uri: membersUri, languageId: 'raven', version: 1, text: 'MEMBERS' } } });
