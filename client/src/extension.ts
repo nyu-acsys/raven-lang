@@ -40,6 +40,11 @@ let client: LanguageClient;
 let verificationStatusBarItem: vscode.StatusBarItem;
 const verificationStates = new VerificationTracker();
 
+/** The message of an error caught from code that may throw anything. */
+function errorMessage(err: unknown): string {
+	return err instanceof Error ? err.message : String(err);
+}
+
 function getActiveRavenEditor(): vscode.TextEditor | undefined {
 	const editor = vscode.window.activeTextEditor;
 	return editor && editor.document.languageId === 'raven' && editor.document.uri.scheme === 'file' ? editor : undefined;
@@ -263,12 +268,12 @@ async function checkForUpdate(context: ExtensionContext, explicit: boolean): Pro
 	let release;
 	try {
 		release = await fetchRelease(pinned ? `v${pinned}` : undefined);
-	} catch (err: any) {
+	} catch (err) {
 		// Offline, rate-limited, or GitHub is having a day. None of that is worth
 		// interrupting someone who did not ask.
-		client?.outputChannel.appendLine(`Raven update check failed: ${err.message}`);
+		client?.outputChannel.appendLine(`Raven update check failed: ${errorMessage(err)}`);
 		if (explicit) {
-			vscode.window.showWarningMessage(`Could not check for Raven updates: ${err.message}`);
+			vscode.window.showWarningMessage(`Could not check for Raven updates: ${errorMessage(err)}`);
 		}
 		return;
 	}
@@ -358,8 +363,8 @@ async function performUpdate(context: ExtensionContext, release: Release): Promi
 				reported = fraction;
 			}, token);
 		});
-	} catch (err: any) {
-		vscode.window.showErrorMessage(`Installing Raven ${release.manifest.version} failed: ${err.message}`);
+	} catch (err) {
+		vscode.window.showErrorMessage(`Installing Raven ${release.manifest.version} failed: ${errorMessage(err)}`);
 		return;
 	}
 
@@ -438,7 +443,7 @@ export function activate(context: ExtensionContext) {
 		execFile('xattr', ['-dr', 'com.apple.quarantine', bundledBinDir], () => { /* ignore errors */ });
 	}
 
-	let debugOptions = { execArgv: ['--nolazy', '--inspect=6009'] };
+	const debugOptions = { execArgv: ['--nolazy', '--inspect=6009'] };
 	// If the extension is launched in debug mode then the debug server options are used
 	// Otherwise the run options are used
 	const serverOptions: ServerOptions = {
@@ -552,7 +557,7 @@ export function activate(context: ExtensionContext) {
 		// network. Whatever it finds is offered once it arrives.
 		if (checkForUpdates()) {
 			checkForUpdate(context, false).catch(err =>
-				client.outputChannel.appendLine(`Raven update check failed: ${err.message}`));
+				client.outputChannel.appendLine(`Raven update check failed: ${errorMessage(err)}`));
 		}
 	}).catch(error => verificationUnavailable(`Could not start the Raven language server: ${error.message}`));
 

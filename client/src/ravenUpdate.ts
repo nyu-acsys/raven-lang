@@ -128,7 +128,13 @@ async function getBuffer(url: string, headers: Record<string, string> = {}, toke
 	});
 }
 
-async function getJson(url: string, token?: CancellationToken): Promise<any> {
+/** The fields of a GitHub release that the extension reads. */
+interface GitHubRelease {
+	tag_name: string;
+	assets?: { name: string; browser_download_url: string }[];
+}
+
+async function getJson(url: string, token?: CancellationToken): Promise<unknown> {
 	const body = await getBuffer(url, { Accept: 'application/vnd.github+json', ...authHeaders() }, token);
 	return JSON.parse(body.toString('utf8'));
 }
@@ -143,7 +149,7 @@ async function getJson(url: string, token?: CancellationToken): Promise<any> {
 export async function fetchRelease(tag: string | undefined, token?: CancellationToken): Promise<Release | undefined> {
 	const base = `https://api.github.com/repos/${RAVEN_REPO.owner}/${RAVEN_REPO.repo}/releases`;
 	const url = tag ? `${base}/tags/${encodeURIComponent(tag)}` : `${base}/latest`;
-	const release = await getJson(url, token);
+	const release = await getJson(url, token) as GitHubRelease;
 
 	const assets = new Map<string, string>();
 	for (const asset of release.assets ?? []) {
@@ -197,9 +203,7 @@ async function extractArchive(archive: string, destination: string): Promise<voi
 	await execFileAsync('tar', ['-xzf', archive, '-C', destination], { timeout: 120000 });
 }
 
-export interface InstallProgress {
-	(fraction: number, message: string): void;
-}
+export type InstallProgress = (fraction: number, message: string) => void;
 
 /**
  * Download and install a release, replacing any existing install of that version.

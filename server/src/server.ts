@@ -176,9 +176,7 @@ connection.onDidChangeConfiguration(async change => {
 		// Reset all cached document settings
 		documentSettings.clear();
 	} else {
-		globalSettings = <ServerSettings>(
-			(change.settings.ravenServer || defaultSettings)
-		);
+		globalSettings = (change.settings.ravenServer || defaultSettings) as ServerSettings;
 	}
 	const changed = JSON.stringify(globalSettings) !== globalBefore
 		|| (await Promise.all(before.map(async ([uri, settings]) =>
@@ -266,7 +264,7 @@ documents.onDidClose(e => {
 });
 
 // Define progress types for workDoneProgress
-const WorkDoneProgressType = new ProgressType<any>();
+const WorkDoneProgressType = new ProgressType<WorkDoneProgressBegin | WorkDoneProgressEnd>();
 
 // Handle manual verification trigger from client
 connection.onNotification('raven/verify', (params: { uri: string, strict?: boolean }) => {
@@ -634,11 +632,11 @@ async function validateTextDocument(
 				}))
 			}));
 		reportAnnotations(contracts, modules);
-		} catch (error: any) {
+		} catch (error) {
 			if (signal.aborted) throw error;
-			unavailable = error.message ?? String(error);
+			unavailable = error instanceof Error ? error.message : String(error);
 			failed = true;
-			connection.console.error(`Error executing Raven: ${error.message}`);
+			connection.console.error(`Error executing Raven: ${unavailable}`);
 			reportAnnotations([], []);
 			// Optionally report a diagnostic if Raven fails to run
 			const diagnostic: Diagnostic = {

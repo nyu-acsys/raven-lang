@@ -14,7 +14,7 @@
 'use strict';
 
 const assert = require('assert');
-const crypto = require('crypto');
+const { createHash } = require('crypto');
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 const https = require('https');
@@ -102,7 +102,7 @@ function buildFixture(dir) {
 	fs.rmSync(stage, { recursive: true, force: true });
 
 	fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(MANIFEST));
-	const digest = crypto.createHash('sha256')
+	const digest = createHash('sha256')
 		.update(fs.readFileSync(path.join(dir, asset))).digest('hex');
 	fs.writeFileSync(path.join(dir, 'SHA256SUMS'), `${digest}  ${asset}\n`);
 	return asset;

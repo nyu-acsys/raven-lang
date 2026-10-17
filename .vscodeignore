@@ -7,7 +7,7 @@ vsc-extension-quickstart.md
 # developer doc; shipping both collides, because the VSIX format treats readme.md and
 # README.md as the same path.
 README.md
-.eslintrc.json
+eslint.config.mjs
 tsconfig.json
 **/*.ts
 !**/*.d.ts
