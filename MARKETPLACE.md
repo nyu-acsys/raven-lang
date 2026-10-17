@@ -150,7 +150,7 @@ The [**Raven Tutorial**](https://nyu-acsys.github.io/raven/tutorial/) is a from-
 
 This extension provides the following settings:
 
-* `ravenServer.maxNumberOfProblems`: Controls the maximum number of problems produced by the server.
+* `ravenServer.maxNumberOfProblems`: The maximum number of errors Raven reports per check; 0 for no limit. Needs a Raven verifier supporting LSP protocol 4 or later.
 * `ravenServer.trace.server`: Traces the communication between VS Code and the language server.
 * `ravenServer.strict`: Enable strict-mode warnings for automatic and ordinary manual verification. Defaults to `false`; see [Strict verification](#strict-verification).
 * `ravenServer.executablePath`: Path to the Raven executable. Leave empty to let the extension choose one; overrides the update channel.

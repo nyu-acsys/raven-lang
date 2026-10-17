@@ -54,7 +54,7 @@ Use **Raven: Verify File in Strict Mode** from the Command Palette for a single 
 
 This extension provides the following settings:
 
-* `ravenServer.maxNumberOfProblems`: Controls the maximum number of problems produced by the server.
+* `ravenServer.maxNumberOfProblems`: The maximum number of errors Raven reports per check; 0 for no limit. Needs a Raven verifier supporting LSP protocol 4 or later.
 * `ravenServer.trace.server`: Traces the communication between VS Code and the language server.
 * `ravenServer.strict`: Enable strict-mode warnings for assumed termination, explicit `free` declarations and physically atomic blocks. Defaults to `false`; can be set per workspace or folder. Requires a verifier supporting LSP protocol 3 or later. Warnings appear in the Problems panel and editor without marking verification as failed; successful verification is shown in yellow when strict warnings are present.
 * `ravenServer.executablePath`: Path to the Raven executable. Leave empty to let the extension choose one; overrides the update channel.

@@ -160,7 +160,7 @@ interface ServerSettings {
 }
 
 // The global settings, used when the `workspace/configuration` request is not supported by the client.
-const defaultSettings: ServerSettings = { strict: false, maxNumberOfProblems: 1000, highlightRelatedLocations: true };
+const defaultSettings: ServerSettings = { strict: false, maxNumberOfProblems: 100, highlightRelatedLocations: true };
 let globalSettings: ServerSettings = defaultSettings;
 
 // Cache the settings of all open documents
@@ -432,12 +432,18 @@ async function validateTextDocument(
 	// not get a flag that raven might reject outright -- same as the CLI's own default
 	// of `--extension default` when nothing auto-detects it.
 	const protocol = lspProtocol ?? 0;
+	// Protocol 4: Raven stops after this many errors; 0 means no limit. Without the flag, it
+	// has no limit under --lsp-mode.
+	const maxErrors = settings.maxNumberOfProblems;
+	const maxErrorsArgs = protocol >= 4 && Number.isInteger(maxErrors) && maxErrors >= 0
+		? ["--max-errors", String(maxErrors)] : [];
 	const argsWith = (extra: string[]) => [
 		"--lsp-mode", "-q", ...extra,
 		...(strict && protocol >= 3 ? ["--strict"] : []),
 		// Protocol 3: Raven also reports annotations, such as inherited contracts.
 		...(protocol >= 3 ? ["--lsp-annotations"] : []),
 		...(protocol >= 2 ? ["--extension", "auto"] : []),
+		...maxErrorsArgs,
 		"--base-dir", dir, tmpfile.name
 	];
 	// Runs Raven with the [extra] arguments, reports the inherited contracts it finds to
@@ -476,7 +482,7 @@ async function validateTextDocument(
 			}
 			reportDependencies(dependencies?.map((file: string) => URI.file(path.resolve(dir, file)).toString()));
 			if (!Array.isArray(output)) annotations.push(...(output.annotations ?? []));
-			failed = errors.some(e => e.kind !== "RelatedLoc" && e.kind !== "Warning");
+			failed = errors.some(e => e.kind !== "RelatedLoc" && e.kind !== "Warning" && e.kind !== "Limit");
 
 			// Raven reports every location in whatever file it is really in: the temporary
 			// copy of this document, a file reached through `include`, or one of its own
@@ -537,7 +543,15 @@ async function validateTextDocument(
 
 				const msg = err.message.join("\n");
 
-				if (err.kind == "RelatedLoc") {
+				if (err.kind === "Limit") {
+					// Protocol 4: Raven stopped after the maximal number of errors.
+					diagnostics.push({
+						severity: DiagnosticSeverity.Information,
+						range: rangeOf(err),
+						message: `Raven stopped after ${maxErrors} errors; increase ravenServer.maxNumberOfProblems to see more.`,
+						source: 'raven'
+					});
+				} else if (err.kind == "RelatedLoc") {
 					if (hasDiagnosticRelatedInformationCapability) {
 						const uri = uriForError(err);
 						const related: DiagnosticRelatedInformation = {

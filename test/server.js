@@ -47,6 +47,7 @@ const visit = (text, base) => {
 visit(text, args[args.indexOf('--base-dir') + 1]);
 if (args.includes('--strict')) errors.push({ ...location, kind: 'Warning', message: ['Assumed termination'] });
 if (text.includes('VERIFY_ERROR') && !args.includes('--typeonly')) errors.push({ ...location, kind: 'Verification', message: ['Assertion failed'] });
+if (text.includes('LIMIT') && !args.includes('--typeonly')) errors.push({ file: '', start_line: 0, start_col: -1, end_line: 0, end_col: -1, kind: 'Limit', message: ['Stopped after 7 errors'] });
 if (text.includes('TYPE_ERROR')) errors.push({ ...location, kind: 'Type', message: ['Type mismatch'] });
 if (text.includes('RELATED_ERROR') && !args.includes('--typeonly')) {
 	const related = (message, line, source = file) => ({ ...location, file: source, start_line: line, end_line: line, kind: 'RelatedLoc', message: [message] });
@@ -329,6 +330,28 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 		assert.strictEqual(stateUpdates.at(-1).state, 'unavailable');
 		send({ method: 'raven/executable', params: { executable, lspProtocol: 3 } });
 		console.log('  ok   a missing executable cannot produce a success state');
+
+		assert(calls().every(args => !args.includes('--max-errors')));
+		const limitUri = pathToFileURL(path.join(dir, 'limit.rav')).toString();
+		send({ method: 'raven/executable', params: { executable, lspProtocol: 4 } });
+		for (const maxNumberOfProblems of [7, 0]) {
+			settings.set(limitUri, { ...defaultSettings, maxNumberOfProblems });
+			send({ method: 'textDocument/didOpen', params: { textDocument: { uri: limitUri, languageId: 'raven', version: 1, text: 'program' } } });
+			assert.deepStrictEqual(await diagnostics(limitUri), []);
+			assert(calls().slice(-2).every(args =>
+				args[args.indexOf('--max-errors') + 1] === String(maxNumberOfProblems)));
+			send({ method: 'textDocument/didClose', params: { textDocument: { uri: limitUri } } });
+		}
+		settings.set(limitUri, { ...defaultSettings, maxNumberOfProblems: 7 });
+		send({ method: 'textDocument/didOpen', params: { textDocument: { uri: limitUri, languageId: 'raven', version: 1, text: 'VERIFY_ERROR LIMIT' } } });
+		const limited = await diagnostics(limitUri);
+		assert.deepStrictEqual(limited.map(d => d.severity), [1, 3]);
+		assert.deepStrictEqual(limited[1].range, { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } });
+		assert.match(limited[1].message, /after 7 errors.*ravenServer\.maxNumberOfProblems/);
+		assert.strictEqual(stateUpdates.at(-1).state, 'failed');
+		send({ method: 'textDocument/didClose', params: { textDocument: { uri: limitUri } } });
+		send({ method: 'raven/executable', params: { executable, lspProtocol: 3 } });
+		console.log('  ok   the limit on problems is passed to verifiers supporting protocol 4 only, and its note names the setting');
 
 		const resource = pathToFileURL(path.join(dir, 'overlap.rav')).toString();
 		for (const changeVersion of [true, false]) {
