@@ -6,6 +6,8 @@ export interface VerificationUpdate {
 	runId: number;
 	state: Exclude<VerificationState, 'unchecked' | 'outdated'>;
 	message?: string;
+	/** The member, module or named assertion the check verified, if not all. */
+	focus?: string;
 }
 
 interface DocumentState {
@@ -13,12 +15,13 @@ interface DocumentState {
 	runId: number;
 	state: VerificationState;
 	message?: string;
+	focus?: string;
 }
 
 export class VerificationTracker {
 	private readonly documents = new Map<string, DocumentState>();
 
-	get(uri: string, version: number): { state: VerificationState, message?: string } {
+	get(uri: string, version: number): { state: VerificationState, message?: string, focus?: string } {
 		const entry = this.documents.get(uri);
 		if (!entry) return { state: 'unchecked' };
 		return entry.version === version ? entry : { state: 'outdated' };

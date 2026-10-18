@@ -213,6 +213,11 @@ function getDocumentSettings(resource: string): Thenable<ServerSettings> {
 
 // Keep a manual override through diagnostic retries until its check completes.
 const pendingStrictChecks = new Map<string, boolean>();
+/**
+ * The member, module or named assertion each document's checks verify, if not all
+ * (protocol 4): set by "Verify this", kept across edits, and dropped when the name is gone.
+ */
+const focusedNames = new Map<string, string>();
 interface VerificationRun { id: number, controller: AbortController, retriggerRequest: boolean, changedFiles: Set<string> }
 const activeRuns = new Map<string, VerificationRun>();
 const documentDependencies = new Map<string, Set<string>>();
@@ -264,6 +269,7 @@ let nextRunId = 0;
 // Only keep settings for open documents
 documents.onDidClose(e => {
 	symbolTables.delete(e.document.uri);
+	focusedNames.delete(e.document.uri);
 	documentSettings.delete(e.document.uri);
 	documentDependencies.delete(e.document.uri);
 	completedResults.delete(e.document.uri);
@@ -275,6 +281,14 @@ documents.onDidClose(e => {
 const WorkDoneProgressType = new ProgressType<WorkDoneProgressBegin | WorkDoneProgressEnd>();
 
 // Handle manual verification trigger from client
+connection.onNotification('raven/focus', (params: { uri: string, name?: string }) => {
+	if (params.name) focusedNames.set(params.uri, params.name);
+	else focusedNames.delete(params.uri);
+	completedResults.delete(params.uri);
+	cancelRun(params.uri);
+	connection.languages.diagnostics.refresh();
+});
+
 connection.onNotification('raven/verify', (params: { uri: string, strict?: boolean }) => {
 	if (params.strict !== undefined) pendingStrictChecks.set(params.uri, params.strict);
 	else pendingStrictChecks.delete(params.uri);
@@ -359,7 +373,7 @@ function locationKey(uri: string, range: Range): string {
 
 type CompletedState = 'succeeded' | 'warnings' | 'failed' | 'unavailable';
 interface VerificationResult { diagnostics: Diagnostic[], state: CompletedState, message?: string }
-interface CheckResult { diagnostics: Diagnostic[], failed: boolean, unavailable?: string }
+interface CheckResult { diagnostics: Diagnostic[], failed: boolean, unavailable?: string, memberNames?: string[] }
 
 connection.languages.diagnostics.on(async (params, token) => {
 	const document = documents.get(params.textDocument.uri);
@@ -385,7 +399,8 @@ connection.languages.diagnostics.on(async (params, token) => {
 		&& documents.get(snapshot.uri)?.version === snapshot.version && !token.isCancellationRequested;
 	const reportState = (state: 'running' | CompletedState, message?: string) => {
 		if (isCurrent()) connection.sendNotification('raven/verificationState', {
-			uri: snapshot.uri, version: snapshot.version, runId, state, message
+			uri: snapshot.uri, version: snapshot.version, runId, state, message,
+			focus: focusedNames.get(snapshot.uri)
 		});
 	};
 	const reportDependencies = (dependencies: string[] | undefined) => {
@@ -497,6 +512,7 @@ async function validateTextDocument(
 	const check = async (extra: string[]): Promise<CheckResult> => {
 		let failed = false;
 		let unavailable: string | undefined;
+		let memberNames: string[] | undefined;
 		const annotations: RavenAnnotation[] = [];
 		const memberStatuses: RavenMemberStatus[] = [];
 
@@ -530,6 +546,9 @@ async function validateTextDocument(
 			reportDependencies(dependencies?.map((file: string) => URI.file(path.resolve(dir, file)).toString()));
 			if (!Array.isArray(output)) annotations.push(...(output.annotations ?? []));
 			if (!Array.isArray(output)) memberStatuses.push(...(output.members ?? []));
+			if (!Array.isArray(output) && Array.isArray(output.members)) {
+				memberNames = output.members.map((m: { name: string }) => m.name);
+			}
 			failed = errors.some(e => e.kind !== "RelatedLoc" && e.kind !== "Warning" && e.kind !== "Limit");
 
 			// Raven reports every location in whatever file it is really in: the temporary
@@ -722,7 +741,7 @@ async function validateTextDocument(
 			};
 			diagnostics.push(diagnostic);
 		}
-		return { diagnostics, failed, unavailable };
+		return { diagnostics, failed, unavailable, memberNames };
 	};
 
 	try {
@@ -733,9 +752,17 @@ async function validateTextDocument(
 			if (typed.failed) {
 				return resultFor(typed);
 			}
+			// The type check lists every member, so a focus whose name is gone is dropped
+			// rather than verified.
+			const focus = focusedNames.get(textDocument.uri);
+			if (focus && typed.memberNames && !typed.memberNames.includes(focus)) {
+				focusedNames.delete(textDocument.uri);
+			}
 		}
 		if (!isCurrent()) throw new ResponseError(LSPErrorCodes.ServerCancelled, 'Verification superseded', { retriggerRequest: true });
-		const result = resultFor(await check([]));
+		// Protocol 4: verify only the focus, if there is one.
+		const focus = protocol >= 4 ? focusedNames.get(textDocument.uri) : undefined;
+		const result = resultFor(await check(focus ? ["--only", focus] : []));
 		if (strict && protocol < 3) {
 			result.state = 'unavailable';
 			result.message = 'Strict-mode diagnostics require a Raven verifier supporting LSP protocol 3 or later.';

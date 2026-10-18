@@ -33,6 +33,7 @@ code --install-extension nyu-acsys.raven-verifier
 
 * **Verification**: Verification runs automatically as you edit — no need to save first.
 * **Manual Verification**: Run **Raven: Verify File** from the Command Palette, or press `Cmd+Shift+R` (Mac) or `Alt+Shift+R` (Windows/Linux) when editing a `.rav` file.
+* **Verify this**: Click **Verify this** above a member, module or named assertion (`assert a: ...`) to verify only it, now and after each edit, while you work on its proof; the status bar names it. Click **Verify all** above it, or run **Raven: Verify All Members (End Focus)**, to verify the whole file again. This needs a Raven verifier supporting LSP protocol 4 or later.
 
 The status bar tracks the active file and its current version. Messages use the **Raven:** prefix: grey for not checked or outdated results, blue while verifying, green when verified, yellow when verified with strict warnings, red for errors, and orange when verification is unavailable. Editing a file marks its previous result as outdated and stops the old check.
 

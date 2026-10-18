@@ -56,6 +56,30 @@ const STATUS_LENSES: Record<string, { title: string, tooltip: string }> = {
 	skipped: { title: '– skipped', tooltip: 'Raven stopped before checking this {kind}, after reaching the error limit.' }
 };
 
+/** The kinds of members that can be verified on their own. */
+const VERIFIABLE = new Set(['proc', 'lemma', 'func', 'pred', 'inv', 'module', 'interface', 'assertion']);
+
+/**
+ * The code lens that verifies only [member] from now on, or, if it is the [focus], all of
+ * the document again.
+ */
+function verifyLens(uri: string, member: MemberStatus, focus: string | undefined): vscode.CodeLens {
+	const range = toRange(member.range);
+	return member.name === focus
+		? new vscode.CodeLens(range, {
+			title: 'Verify all',
+			tooltip: `Raven verifies only ${member.name}. Click to verify the whole file again.`,
+			command: 'raven.verifyAll',
+			arguments: [uri]
+		})
+		: new vscode.CodeLens(range, {
+			title: 'Verify this',
+			tooltip: `Verify only ${member.name}, now and after each edit, until "Verify all".`,
+			command: 'raven.verifyThis',
+			arguments: [uri, member.name]
+		});
+}
+
 /** The words for each status in a module's summary, worst first. */
 const SUMMARY_WORDS: [string, string][] = [
 	['failed', 'failed'], ['timeout', 'timed out'], ['skipped', 'skipped'], ['verified', 'verified']
@@ -140,6 +164,8 @@ function membersHoverText(module: InheritedMembers): vscode.MarkdownString {
 export function registerInheritedContracts(context: vscode.ExtensionContext, client: LanguageClient) {
 	const annotations = new Map<string, InheritedAnnotations>();
 	const runs = new Map<string, { version: number, runId: number, accepting: boolean }>();
+	// The focus of each document's checks, as the server last reported it.
+	const focuses = new Map<string, string>();
 	const lensesChanged = new vscode.EventEmitter<void>();
 	const openDocument = (uri: string) => vscode.workspace.textDocuments.find(d => d.uri.toString() === uri);
 	const currentAnnotations = (document: vscode.TextDocument) => {
@@ -153,11 +179,17 @@ export function registerInheritedContracts(context: vscode.ExtensionContext, cli
 	};
 	const clear = () => {
 		runs.clear();
+		focuses.clear();
 		const hadAnnotations = annotations.size > 0;
 		annotations.clear();
 		if (hadAnnotations) lensesChanged.fire();
 	};
 	const onVerificationState = (update: VerificationUpdate) => {
+		if (openDocument(update.uri)?.version === update.version && focuses.get(update.uri) !== update.focus) {
+			if (update.focus) focuses.set(update.uri, update.focus);
+			else focuses.delete(update.uri);
+			lensesChanged.fire();
+		}
 		if (update.state !== 'running' || openDocument(update.uri)?.version !== update.version) return;
 		if ((runs.get(update.uri)?.runId ?? -1) >= update.runId) return;
 		invalidate(update.uri);
@@ -174,6 +206,7 @@ export function registerInheritedContracts(context: vscode.ExtensionContext, cli
 		vscode.workspace.onDidCloseTextDocument(document => {
 			invalidate(document.uri.toString());
 			runs.delete(document.uri.toString());
+			focuses.delete(document.uri.toString());
 		}),
 		client.onDidChangeState(({ newState }) => {
 			if (newState === State.Starting || newState === State.Stopped) clear();
@@ -194,7 +227,10 @@ export function registerInheritedContracts(context: vscode.ExtensionContext, cli
 			const members = current?.members ?? [];
 			const statuses = members.map(member => statusLens(member, members))
 				.filter((lens): lens is vscode.CodeLens => lens !== undefined);
-			return statuses.concat((current?.contracts ?? []).map(contract =>
+			const focus = focuses.get(document.uri.toString());
+			const verify = members.filter(m => VERIFIABLE.has(m.kind) && !m.inherited)
+				.map(m => verifyLens(document.uri.toString(), m, focus));
+			return statuses.concat(verify, (current?.contracts ?? []).map(contract =>
 				new vscode.CodeLens(toRange(contract.range), {
 					title: `inherited: ${summary(contract)}`,
 					tooltip: `Contract inherited from ${contract.source}. Click to open it.`,

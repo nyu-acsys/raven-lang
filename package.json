@@ -125,6 +125,11 @@
         "category": "Raven"
       },
       {
+        "command": "raven.verifyAll",
+        "title": "Raven: Verify All Members (End Focus)",
+        "category": "Raven"
+      },
+      {
         "command": "raven.verifyStrict",
         "title": "Raven: Verify File in Strict Mode",
         "category": "Raven"

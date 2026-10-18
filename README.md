@@ -48,6 +48,8 @@ The status bar tracks the active file and its current version. Messages use the 
 
 With a verifier reporting included-file dependencies, saving or changing an included file refreshes its dependent documents, including indirect includes and files outside the workspace. Older verifiers conservatively refresh open documents for workspace `.rav` changes.
 
+Click **Verify this** above a member, module or named assertion (`assert a: ...`) to verify only it, now and after each edit, while you work on its proof; the status bar names it. Click **Verify all** above it, or run **Raven: Verify All Members (End Focus)**, to verify the whole file again. This needs a Raven verifier supporting LSP protocol 4 or later.
+
 Use **Raven: Verify File in Strict Mode** from the Command Palette for a single strict verification of the active file, regardless of `ravenServer.strict`. It leaves the setting unchanged; subsequent automatic checks and **Raven: Verify File** use the configured mode.
 
 ## Configuration

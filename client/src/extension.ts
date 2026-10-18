@@ -55,9 +55,9 @@ function updateStatusBar(editor: vscode.TextEditor | undefined) {
 		verificationStatusBarItem.hide();
 		return;
 	}
-	const { state, message } = verificationStates.get(editor.document.uri.toString(), editor.document.version);
+	const { state, message, focus } = verificationStates.get(editor.document.uri.toString(), editor.document.version);
 	const presentation = verificationPresentation[state];
-	verificationStatusBarItem.text = presentation.text;
+	verificationStatusBarItem.text = focus ? `${presentation.text} (${focus} only)` : presentation.text;
 	verificationStatusBarItem.color = new vscode.ThemeColor(presentation.color);
 	verificationStatusBarItem.tooltip = message ?? presentation.tooltip;
 	verificationStatusBarItem.show();
@@ -570,6 +570,20 @@ export function activate(context: ExtensionContext) {
 		client.sendNotification('raven/verify', { uri: editor.document.uri.toString(), strict });
 	};
 	context.subscriptions.push(vscode.commands.registerCommand('raven.verify', () => verifyFile()));
+	// "Verify this" focuses the document's checks on one member, module or named assertion;
+	// "Verify all" ends the focus.
+	const focus = (uri: string, name?: string) => {
+		const document = vscode.workspace.textDocuments.find(d => d.uri.toString() === uri);
+		if (document) verificationStates.invalidate(uri, document.version);
+		updateStatusBar(getActiveRavenEditor());
+		client.sendNotification('raven/focus', { uri, name });
+	};
+	context.subscriptions.push(vscode.commands.registerCommand('raven.verifyThis',
+		(uri: string, name: string) => focus(uri, name)));
+	context.subscriptions.push(vscode.commands.registerCommand('raven.verifyAll', (uri?: string) => {
+		const target = uri ?? getActiveRavenEditor()?.document.uri.toString();
+		if (target) focus(target);
+	}));
 	context.subscriptions.push(vscode.commands.registerCommand('raven.verifyStrict', () => verifyFile(true)));
 
 	context.subscriptions.push(vscode.commands.registerCommand('raven.updateVerifier', () =>

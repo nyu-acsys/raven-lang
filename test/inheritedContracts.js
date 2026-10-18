@@ -121,9 +121,25 @@ try {
 		members: ['verified', 'failed', 'timeout', 'skipped', 'unknown'].map((status, line) =>
 			({ range: range(line), name: `p${line}`, kind: 'proc', status }))
 	});
-	assert.deepStrictEqual(lenses(statusDocument).map(lens => lens.command.title),
-		['✓ verified', '✗ failed', '⏱ timed out', '– skipped']);
+	const titles = (document, verify) => lenses(document).map(lens => lens.command.title)
+		.filter(title => title.startsWith('Verify') === verify);
+	assert.deepStrictEqual(titles(statusDocument, false), ['✓ verified', '✗ failed', '⏱ timed out', '– skipped']);
 	assert(lenses(statusDocument)[1].command.tooltip.startsWith('p1: Raven could not verify this proc'));
+	assert.deepStrictEqual(titles(statusDocument, true), Array(5).fill('Verify this'));
+	const verifyP2 = lenses(statusDocument).find(lens => lens.command.arguments?.[1] === 'p2');
+	assert.deepStrictEqual(verifyP2.command.arguments, [statusDocument.uri.toString(), 'p2']);
+	assert.strictEqual(verifyP2.command.command, 'raven.verifyThis');
+	emit('raven/verificationState', {
+		uri: statusDocument.uri.toString(), version: statusDocument.version, runId: 1, state: 'failed', focus: 'p2'
+	});
+	const focused = lenses(statusDocument).filter(lens => lens.command.title.startsWith('Verify'));
+	assert.deepStrictEqual(focused.map(lens => lens.command.title),
+		['Verify this', 'Verify this', 'Verify all', 'Verify this', 'Verify this']);
+	assert.strictEqual(focused[2].command.command, 'raven.verifyAll');
+	emit('raven/verificationState', {
+		uri: statusDocument.uri.toString(), version: statusDocument.version, runId: 1, state: 'failed'
+	});
+	assert.deepStrictEqual(titles(statusDocument, true), Array(5).fill('Verify this'));
 	emit('raven/inheritedContracts', {
 		uri: statusDocument.uri.toString(), version: statusDocument.version, runId: 1, contracts: [],
 		members: [
@@ -132,9 +148,10 @@ try {
 		]
 	});
 	assert.deepStrictEqual(lenses(statusDocument).map(lens => lens.command.title),
-		['✗ 2 failed, 1 timed out, 9 verified']);
+		['✗ 2 failed, 1 timed out, 9 verified', 'Verify this']);
 	assert(lenses(statusDocument)[0].command.tooltip.endsWith('Inherited:\n✗ failed: lemma compCommute'));
 	console.log('  ok   code lenses show the status of members, ignoring unknown ones, and summarize modules');
+	console.log('  ok   members and modules get a Verify this lens, and the focus a Verify all one');
 
 	let refreshes = 0;
 	context.subscriptions.push(providers.lenses.onDidChangeCodeLenses(() => refreshes++));

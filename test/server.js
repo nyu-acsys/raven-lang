@@ -67,7 +67,8 @@ if ((text.includes('BLOCK_TYPE') && args.includes('--typeonly'))
 	setInterval(() => {}, 1000);
 	return;
 }
-const members = text.includes('MEMBERS') && !args.includes('--typeonly') ? [
+const members = text.includes('FOCUS') ? [{ ...location, name: 'M.p', kind: 'proc' }]
+	: text.includes('MEMBERS') && !args.includes('--typeonly') ? [
 	{ ...location, name: 'M.p', kind: 'proc', status: 'verified' },
 	{ ...location, file: 'other.rav', name: 'q', kind: 'lemma', status: 'failed' }
 ] : [];
@@ -387,6 +388,33 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 		assert.strictEqual(await request('textDocument/hover', position), null);
 		send({ method: 'textDocument/didClose', params: { textDocument: { uri: symbolsUri } } });
 		console.log('  ok   hovers and definitions come from the names of the latest check, and closing forgets them');
+
+		send({ method: 'raven/executable', params: { executable, lspProtocol: 4 } });
+		const focusUri = pathToFileURL(path.join(dir, 'focus.rav')).toString();
+		send({ method: 'textDocument/didOpen', params: { textDocument: { uri: focusUri, languageId: 'raven', version: 1, text: 'FOCUS' } } });
+		assert.deepStrictEqual(await diagnostics(focusUri), []);
+		const focusStart = stateUpdates.length;
+		send({ method: 'raven/focus', params: { uri: focusUri, name: 'M.p' } });
+		assert.deepStrictEqual(await diagnostics(focusUri), []);
+		const [typeCheck, verification] = calls().slice(-2);
+		assert(typeCheck.includes('--typeonly') && !typeCheck.includes('--only'));
+		assert.strictEqual(verification[verification.indexOf('--only') + 1], 'M.p');
+		assert(stateUpdates.slice(focusStart).filter(u => u.uri === focusUri).every(u => u.focus === 'M.p'));
+		send({ method: 'textDocument/didChange', params: { textDocument: { uri: focusUri, version: 2 }, contentChanges: [{ text: 'FOCUS edited' }] } });
+		assert.deepStrictEqual(await diagnostics(focusUri), []);
+		assert(calls().at(-1).includes('--only'));
+		send({ method: 'raven/focus', params: { uri: focusUri, name: 'M.gone' } });
+		assert.deepStrictEqual(await diagnostics(focusUri), []);
+		assert(!calls().at(-1).includes('--only'));
+		assert.strictEqual(stateUpdates.at(-1).focus, undefined);
+		send({ method: 'raven/focus', params: { uri: focusUri, name: 'M.p' } });
+		await diagnostics(focusUri);
+		send({ method: 'raven/focus', params: { uri: focusUri } });
+		await diagnostics(focusUri);
+		assert(!calls().at(-1).includes('--only'));
+		send({ method: 'textDocument/didClose', params: { textDocument: { uri: focusUri } } });
+		send({ method: 'raven/executable', params: { executable, lspProtocol: 3 } });
+		console.log('  ok   a focus is verified alone across edits until cleared, and dropped when its name is gone');
 
 		const membersUri = pathToFileURL(path.join(dir, 'members.rav')).toString();
 		send({ method: 'textDocument/didOpen', params: { textDocument: { uri: membersUri, languageId: 'raven', version: 1, text: 'MEMBERS' } } });
