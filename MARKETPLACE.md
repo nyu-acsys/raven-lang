@@ -15,7 +15,7 @@ New to Raven? **[nyu-acsys.github.io/raven](https://nyu-acsys.github.io/raven/)*
 - **Diagnostics**: Errors and warnings shown in the editor and Problems panel, with related locations and optional gutter icons.
 - **Inherited Contracts**: View inherited contracts above callable headers and on hover, and inherited module members on hover.
 - **Hover and Go to Definition**: See the declaration of a name on hover, and jump to it, including into the standard library.
-- **Counterexamples**: For a failed check, the values of the variables and fields it mentions appear at its end, and hovering over a variable of the failing member shows its value there. "possibly" marks values the solver could not confirm. Hovering over a hint shows the whole counterexample; VS Code shortens long hints unless `editor.inlayHints.maximumLength` is `0`.
+- **Counterexamples**: For a failed check, the values of the variables and fields it mentions appear at its end, the branch its path takes at each `if` before it after the condition, and hovering over a variable of the failing member shows its value there. "possibly" marks values the solver could not confirm. Hovering over a hint shows the whole counterexample; VS Code shortens long hints unless `editor.inlayHints.maximumLength` is `0`.
 - **Outline**: Modules, members and named assertions and invariants in the Outline view, breadcrumbs and **Go to Symbol in Editor**, with their verification status.
 - **Verification Status**: See above each procedure, lemma, function and module whether it verified, failed or timed out.
 

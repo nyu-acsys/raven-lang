@@ -50,6 +50,7 @@ if (text.includes('VERIFY_ERROR') && !args.includes('--typeonly')) errors.push({
 if (text.includes('CEX') && args.includes('--counterexamples')) {
 	errors.push({ ...location, kind: 'Verification', message: ['Assertion failed'] });
 	errors.push({ file: '', start_line: 0, start_col: -1, end_line: 0, end_col: -1, kind: 'Counterexample', certain: true, message: ['x = 3', 'CEX = 1'] });
+	errors.push({ ...location, start_line: 1, end_line: 1, start_col: 0, end_col: 4, kind: 'Branch', message: ['then'] });
 }
 if (text.includes('LIMIT') && !args.includes('--typeonly')) errors.push({ file: '', start_line: 0, start_col: -1, end_line: 0, end_col: -1, kind: 'Limit', message: ['Stopped after 7 errors'] });
 if (text.includes('TYPE_ERROR')) errors.push({ ...location, kind: 'Type', message: ['Type mismatch'] });
@@ -437,7 +438,8 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 		assert.deepStrictEqual(cexDiagnostics.map(d => d.message), ['[Verification Error] Assertion failed']);
 		assert(calls().at(-1).includes('--counterexamples') && !calls().at(-2).includes('--counterexamples'));
 		const hints = await request('textDocument/inlayHint', { textDocument: { uri: cexUri }, range: { start: { line: 0, character: 0 }, end: { line: 2, character: 0 } } });
-		assert.deepStrictEqual(hints.map(h => [h.position, h.label]), [[{ line: 1, character: 5 }, 'CEX = 1']]);
+		assert.deepStrictEqual(hints.map(h => [h.position, h.label]),
+			[[{ line: 1, character: 5 }, 'CEX = 1'], [{ line: 0, character: 4 }, '→ then (failure on line 2)']]);
 		send({ method: 'textDocument/didClose', params: { textDocument: { uri: cexUri } } });
 		send({ method: 'raven/executable', params: { executable, lspProtocol: 3 } });
 		console.log('  ok   counterexamples come with failures from protocol 4 on, as refreshed inlay hints and not as diagnostics');

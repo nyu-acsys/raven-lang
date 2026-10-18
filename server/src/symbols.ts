@@ -183,7 +183,9 @@ export function outlineOf(outline: Outline, text: string): DocumentSymbol[] {
 export interface CounterexampleEntry {
 	range: Range,
 	certain: boolean,
-	values: { name: string, value: string }[]
+	values: { name: string, value: string }[],
+	/** The arm taken at each conditional its path passed before the failure, by condition. */
+	branches?: { range: Range, label: string }[]
 }
 
 export interface Counterexamples { version: number, lines: string[], entries: CounterexampleEntry[] }
@@ -244,6 +246,41 @@ export function valueName(symbol: SymbolInfo, line: string, start: number): stri
 	const receiver = /[A-Za-z_][A-Za-z0-9_']*$/.exec(line.slice(0, start - 1));
 	if (!receiver || (receiver.index > 0 && line[receiver.index - 1] === '.')) return undefined;
 	return `${receiver[0]}.${symbol.name.slice(symbol.name.lastIndexOf('.') + 1)}`;
+}
+
+/**
+ * Inlay hints at the end of each condition, on a line unchanged since the check, with the
+ * arm that the failing paths take there, and the lines they fail on.
+ */
+export function branchHintsOf(counterexamples: Counterexamples, text: string): InlayHint[] {
+	const current = text.split('\n');
+	const map = lineMap(counterexamples.lines, current);
+	const atCondition = new Map<string, { position: Position, arms: Map<string, number[]> }>();
+	for (const entry of counterexamples.entries) {
+		const failure = map(entry.range.start.line);
+		for (const branch of entry.branches ?? []) {
+			const line = map(branch.range.end.line);
+			if (line === undefined || failure === undefined) continue;
+			// After the parenthesis closing the condition, if one does.
+			const end = branch.range.end.character;
+			const character = current[line]?.[end] === ')' ? end + 1 : end;
+			const key = `${line}:${character}`;
+			const hint = atCondition.get(key)
+				?? { position: { line, character }, arms: new Map() };
+			hint.arms.set(branch.label, [...(hint.arms.get(branch.label) ?? []), failure + 1]);
+			atCondition.set(key, hint);
+		}
+	}
+	return [...atCondition.values()].map(hint => {
+		const arms = [...hint.arms.entries()].map(([label, lines]) =>
+			`${label} (${lines.length === 1 ? 'failure on line' : 'failures on lines'} ${lines.join(', ')})`);
+		return {
+			position: hint.position,
+			label: `→ ${arms.join(', ')}`,
+			paddingLeft: true,
+			tooltip: 'The arm that the path to each failing check takes here, by its counterexample.'
+		};
+	});
 }
 
 const CALLABLE_KINDS = new Set(['proc', 'lemma', 'func', 'pred', 'inv']);

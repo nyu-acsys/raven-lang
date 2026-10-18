@@ -31,7 +31,7 @@ import { URI, Utils } from 'vscode-uri';
 import { VerificationProcesses } from './verificationProcesses';
 import {
 	Counterexamples, CounterexampleEntry, Outline, SymbolTable, counterexampleValue, counterexampleValues,
-	definitionAt, hoverAt, inlayHintsOf, outlineOf, symbolAt, valueName
+	branchHintsOf, definitionAt, hoverAt, inlayHintsOf, outlineOf, symbolAt, valueName
 } from './symbols';
 import { match } from "ts-pattern";
 import * as tmp from 'tmp';
@@ -350,17 +350,19 @@ connection.onHover(params => {
 		document.getText(), params.position, name);
 	if (!found) return hover;
 	const contents = hover.contents as { kind: 'markdown', value: string };
-	const label = found.certain ? 'Counterexample' : 'Possible counterexample';
+	// Whether the counterexample is certain is said at the failure itself.
 	return {
 		...hover,
-		contents: { kind: 'markdown', value: `${contents.value}\n\n${label}: \`${name} = ${found.value}\` at the failure on line ${found.line + 1}` }
+		contents: { kind: 'markdown', value: `${contents.value}\n\nCounterexample: \`${name} = ${found.value}\` at the failure on line ${found.line + 1}` }
 	};
 });
 
 connection.languages.inlayHint.on(params => {
 	const counterexamples = counterexampleTables.get(params.textDocument.uri);
 	const document = documents.get(params.textDocument.uri);
-	return counterexamples && document ? inlayHintsOf(counterexamples, document.getText()) : null;
+	return counterexamples && document
+		? [...inlayHintsOf(counterexamples, document.getText()), ...branchHintsOf(counterexamples, document.getText())]
+		: null;
 });
 
 connection.onDefinition(params => {
@@ -595,7 +597,7 @@ async function validateTextDocument(
 			if (!Array.isArray(output) && Array.isArray(output.members)) {
 				memberNames = output.members.map((m: { name: string }) => m.name);
 			}
-			failed = errors.some(e => !["RelatedLoc", "Warning", "Limit", "Counterexample"].includes(e.kind));
+			failed = errors.some(e => !["RelatedLoc", "Warning", "Limit", "Counterexample", "Branch"].includes(e.kind));
 
 			// Raven reports every location in whatever file it is really in: the temporary
 			// copy of this document, a file reached through `include`, or one of its own
@@ -657,7 +659,13 @@ async function validateTextDocument(
 
 				const msg = err.message.join("\n");
 
-				if (err.kind === "Counterexample") {
+				if (err.kind === "Branch") {
+					// Protocol 4: the arm of a conditional the counterexample before it takes.
+					const last = counterexamples.at(-1);
+					if (last && uriForError(err) === textDocument.uri) {
+						last.branches = [...(last.branches ?? []), { range: rangeOf(err), label: msg }];
+					}
+				} else if (err.kind === "Counterexample") {
 					// Protocol 4: the values for which the error before it occurs.
 					if (previousError) counterexamples.push({
 						range: previousError.range,

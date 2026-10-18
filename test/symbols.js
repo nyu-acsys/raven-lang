@@ -6,7 +6,7 @@
  */
 
 const assert = require('assert');
-const { hoverAt, definitionAt, outlineOf, inlayHintsOf, counterexampleValue, counterexampleValues, valueName } = require('../server/out/symbols');
+const { hoverAt, definitionAt, outlineOf, inlayHintsOf, counterexampleValue, counterexampleValues, valueName, branchHintsOf } = require('../server/out/symbols');
 
 const uri = 'file:///tests/main.rav';
 const range = (line, start, end) => ({ start: { line, character: start }, end: { line, character: end } });
@@ -115,3 +115,21 @@ assert.strictEqual(valueName(field, '  y := r.next.f;', 14), undefined);
 assert.strictEqual(valueName(field, '  field f: Int', 8), undefined);
 assert.strictEqual(valueName({ name: 'p', kind: 'procedure' }, 'p()', 0), undefined);
 console.log('  ok   a value is named by its variable, or by a field of a variable');
+
+const branching = ['proc b(x: Int) {', '  if (x > 0) {', '    x := 1;', '  }', '  assert x > 1;', '  assert x > 2;', '}'];
+const condition = { range: range(1, 6, 11), label: 'skipped' };
+const paths = {
+	version: 1,
+	lines: branching,
+	entries: [
+		{ range: range(4, 9, 14), certain: true, values: [], branches: [condition] },
+		{ range: range(5, 9, 14), certain: false, values: [], branches: [{ ...condition, label: 'then' }] }
+	]
+};
+const [branchHint] = branchHintsOf(paths, text(branching));
+assert.deepStrictEqual(branchHint.position, { line: 1, character: 12 });
+assert.strictEqual(branchHint.label, '→ skipped (failure on line 5), then (failure on line 6)');
+const certainPaths = { ...paths, entries: [paths.entries[0], { ...paths.entries[0], range: range(5, 9, 14) }] };
+assert.strictEqual(branchHintsOf(certainPaths, text(branching))[0].label, '→ skipped (failures on lines 5, 6)');
+assert.deepStrictEqual(branchHintsOf(paths, text(['proc b(x: Int) {', '  if (x >= 0) {', ...branching.slice(2)])), []);
+console.log('  ok   branch hints follow conditions, with the arms failing paths take and their lines');
