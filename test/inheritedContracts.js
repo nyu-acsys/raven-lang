@@ -124,7 +124,9 @@ try {
 	const titles = (document, verify) => lenses(document).map(lens => lens.command.title)
 		.filter(title => title.startsWith('Verify') === verify);
 	assert.deepStrictEqual(titles(statusDocument, false), ['✓ verified', '✗ failed', '⏱ timed out', '– skipped']);
-	assert(lenses(statusDocument)[1].command.tooltip.startsWith('p1: Raven could not verify this proc'));
+	assert(lenses(statusDocument).find(lens => lens.command.title === '✗ failed')
+		.command.tooltip.startsWith('p1: Raven could not verify this proc'));
+	assert.strictEqual(lenses(statusDocument).at(-1).command.title, '– skipped');
 	assert.deepStrictEqual(titles(statusDocument, true), Array(5).fill('Verify this'));
 	const verifyP2 = lenses(statusDocument).find(lens => lens.command.arguments?.[1] === 'p2');
 	assert.deepStrictEqual(verifyP2.command.arguments, [statusDocument.uri.toString(), 'p2']);
@@ -148,8 +150,8 @@ try {
 		]
 	});
 	assert.deepStrictEqual(lenses(statusDocument).map(lens => lens.command.title),
-		['✗ 2 failed, 1 timed out, 9 verified', 'Verify this']);
-	assert(lenses(statusDocument)[0].command.tooltip.endsWith('Inherited:\n✗ failed: lemma compCommute'));
+		['Verify this', '✗ 2 failed, 1 timed out, 9 verified']);
+	assert(lenses(statusDocument).at(-1).command.tooltip.endsWith('Inherited:\n✗ failed: lemma compCommute'));
 	console.log('  ok   code lenses show the status of members, ignoring unknown ones, and summarize modules');
 	console.log('  ok   members and modules get a Verify this lens, and the focus a Verify all one');
 

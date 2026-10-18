@@ -230,7 +230,9 @@ export function registerInheritedContracts(context: vscode.ExtensionContext, cli
 			const focus = focuses.get(document.uri.toString());
 			const verify = members.filter(m => VERIFIABLE.has(m.kind) && !m.inherited)
 				.map(m => verifyLens(document.uri.toString(), m, focus));
-			return statuses.concat(verify, (current?.contracts ?? []).map(contract =>
+			// The status last: it disappears while a member is rechecked, which moves
+			// nothing then.
+			return verify.concat((current?.contracts ?? []).map(contract =>
 				new vscode.CodeLens(toRange(contract.range), {
 					title: `inherited: ${summary(contract)}`,
 					tooltip: `Contract inherited from ${contract.source}. Click to open it.`,
@@ -239,7 +241,7 @@ export function registerInheritedContracts(context: vscode.ExtensionContext, cli
 						vscode.Uri.parse(contract.sourceLocation.uri),
 						{ selection: toRange(contract.sourceLocation.range) }
 					]
-				})));
+				})), statuses);
 		}
 	}));
 
