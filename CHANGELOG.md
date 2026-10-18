@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `ravenServer.maxNumberOfProblems` limits the errors Raven reports (LSP protocol 4).
+- The status bar reads **Raven: Failed** for a failed verification, matching **Raven: Verified**.
 
 ## [1.3.0] - 2026-10-16
 

@@ -60,6 +60,6 @@ export const verificationPresentation: Record<VerificationState, { text: string,
 	running: { text: '$(sync~spin) Raven: Verifying', color: 'charts.blue', tooltip: 'Raven is checking this document.' },
 	succeeded: { text: '$(check) Raven: Verified', color: 'charts.green', tooltip: 'Verification completed successfully for this document version.' },
 	warnings: { text: '$(warning) Raven: Verified with warnings', color: 'charts.yellow', tooltip: 'Verification completed successfully with strict-mode warnings.' },
-	failed: { text: '$(error) Raven: Verification failed', color: 'charts.red', tooltip: 'Raven reported an error for this document version.' },
+	failed: { text: '$(error) Raven: Failed', color: 'charts.red', tooltip: 'Raven reported an error for this document version.' },
 	unavailable: { text: '$(warning) Raven: Verification unavailable', color: 'charts.orange', tooltip: 'Raven could not complete verification.' }
 };
