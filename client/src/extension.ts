@@ -463,7 +463,9 @@ export function activate(context: ExtensionContext) {
 			raven: {
 				executable: currentBinary.executable,
 				z3Dir: currentBinary.z3Dir
-			}
+			},
+			// Where Raven keeps the fingerprints of verified members (protocol 4).
+			cacheDir: path.join(context.globalStorageUri.fsPath, 'verification-cache')
 		}
 	};
 

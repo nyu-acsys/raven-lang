@@ -102,10 +102,11 @@ connection.onNotification('raven/executable', (params: RavenExecutable) => {
 connection.onInitialize((params: InitializeParams) => {
 	const capabilities = params.capabilities;
 
-	const initOptions = params.initializationOptions as { raven?: RavenExecutable } | undefined;
+	const initOptions = params.initializationOptions as { raven?: RavenExecutable, cacheDir?: string } | undefined;
 	if (initOptions?.raven) {
 		ravenExecutable = initOptions.raven;
 	}
+	cacheDir = initOptions?.cacheDir;
 
 	// Does the client support the `workspace/configuration` request?
 	// If not, we fall back using global settings.
@@ -170,12 +171,16 @@ interface ServerSettings {
 	maxNumberOfProblems: number;
 	smtTimeout: number;
 	highlightRelatedLocations: boolean;
+	cache: boolean;
 }
 
 // The global settings, used when the `workspace/configuration` request is not supported by the client.
 const defaultSettings: ServerSettings = {
-	strict: false, maxNumberOfProblems: 100, smtTimeout: 10000, highlightRelatedLocations: true
+	strict: false, maxNumberOfProblems: 100, smtTimeout: 10000, highlightRelatedLocations: true, cache: true
 };
+
+/** Where Raven keeps the fingerprints of verified members, in the extension's storage. */
+let cacheDir: string | undefined;
 let globalSettings: ServerSettings = defaultSettings;
 
 // Cache the settings of all open documents
@@ -264,9 +269,10 @@ function cancelAllRuns(retriggerRequest = true): void {
 connection.onShutdown(async () => {
 	cancelAllRuns(false);
 	await verificationProcesses.waitForIdle();
+	await verificationProcesses.stopServers();
 });
-connection.onExit(() => cancelAllRuns(false));
-process.on('exit', () => cancelAllRuns(false));
+connection.onExit(() => { cancelAllRuns(false); void verificationProcesses.stopServers(); });
+process.on('exit', () => { cancelAllRuns(false); void verificationProcesses.stopServers(); });
 documents.onDidChangeContent(e => {
 	pendingStrictChecks.delete(e.document.uri);
 	completedResults.delete(e.document.uri);
@@ -392,13 +398,14 @@ interface RavenSymbol { name: string, kind: string, definition: RavenLocation, d
  */
 interface RavenMemberStatus extends RavenLocation {
 	name: string, kind: string, status?: string, counts?: Record<string, number>, inherited?: boolean,
-	checked?: boolean, extent?: { start_line: number, start_col: number, end_line: number, end_col: number }
+	checked?: boolean, cached?: boolean,
+	extent?: { start_line: number, start_col: number, end_line: number, end_col: number }
 }
 
 /** What the client shows above a member that was verified. */
 interface MemberStatus {
 	range: Range, name: string, kind: string, status?: string, counts?: Record<string, number>,
-	inherited?: boolean, checked?: boolean
+	inherited?: boolean, checked?: boolean, cached?: boolean
 }
 
 /** What the client shows for a module that inherits members. */
@@ -545,6 +552,8 @@ async function validateTextDocument(
 	const smtTimeout = settings.smtTimeout;
 	const smtTimeoutArgs = Number.isInteger(smtTimeout) && smtTimeout > 0
 		? ["--smt-timeout", String(smtTimeout)] : [];
+	// Protocol 4: Raven skips the members verified before whose dependencies are unchanged.
+	const cacheArgs = protocol >= 4 && settings.cache !== false && cacheDir ? ["--cache-dir", cacheDir] : [];
 	const argsWith = (extra: string[]) => [
 		"--lsp-mode", "-q", ...extra,
 		...(strict && protocol >= 3 ? ["--strict"] : []),
@@ -553,6 +562,7 @@ async function validateTextDocument(
 		...(protocol >= 2 ? ["--extension", "auto"] : []),
 		...maxErrorsArgs,
 		...smtTimeoutArgs,
+		...cacheArgs,
 		"--base-dir", dir, tmpfile.name
 	];
 	// Runs Raven with the [extra] arguments, reports the inherited contracts it finds to
@@ -567,7 +577,10 @@ async function validateTextDocument(
 		const diagnostics: Diagnostic[] = [];
 
 		try {
-			const stdout = await verificationProcesses.run(executable, argsWith(extra), { cwd: dir, env }, signal);
+			// Protocol 4: a Raven server keeps the checked library between runs.
+			const stdout = protocol >= 4
+				? await verificationProcesses.serve(executable, argsWith(extra), dir, env, signal)
+				: await verificationProcesses.run(executable, argsWith(extra), { cwd: dir, env }, signal);
 
 			connection.console.log(`Raven response: ${stdout}`);
 
@@ -798,7 +811,7 @@ async function validateTextDocument(
 			.filter(m => uriForError(m) === textDocument.uri)
 			.map(m => ({
 				range: rangeOf(m), name: m.name, kind: m.kind, status: m.status, counts: m.counts,
-				inherited: m.inherited, checked: m.checked
+				inherited: m.inherited, checked: m.checked, cached: m.cached
 			}));
 		reportAnnotations(contracts, modules, members);
 		} catch (error) {

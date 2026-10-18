@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Verify this** verifies only one member or named assertion until **Verify all** (LSP protocol 4).
 - The Outline view, breadcrumbs and Go to Symbol list modules, members and named assertions (LSP protocol 4).
 - A failed check shows a counterexample as inlay hints and in variables' hovers (LSP protocol 4).
+- Checks run in a Raven server, which keeps the library checked between them (LSP protocol 4).
+- `ravenServer.cache` skips members verified before whose dependencies are unchanged (LSP protocol 4).
 
 ### Changed
 

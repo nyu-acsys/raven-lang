@@ -53,6 +53,12 @@
           "default": 10000,
           "description": "The time limit, in milliseconds, for each proof obligation the SMT solver checks. A member whose proof runs out of time is marked as timed out."
         },
+        "ravenServer.cache": {
+          "scope": "resource",
+          "type": "boolean",
+          "default": true,
+          "description": "Skip the checks of members verified before whose dependencies are unchanged, keeping their fingerprints in the extension's storage. Needs a Raven verifier supporting LSP protocol 4 or later."
+        },
         "ravenServer.trace.server": {
           "scope": "window",
           "type": "string",

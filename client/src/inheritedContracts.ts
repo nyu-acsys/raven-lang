@@ -37,6 +37,8 @@ interface MemberStatus {
 	counts?: Record<string, number>,
 	/** Whether a module inherits it; it is then located at the module. */
 	inherited?: boolean,
+	/** Whether its status is from an earlier check, as Raven's cache shows. */
+	cached?: boolean,
 	/** Whether it is known to be checked before it is verified. */
 	checked?: boolean
 }
@@ -120,9 +122,12 @@ function statusLens(member: MemberStatus, members: MemberStatus[]): vscode.CodeL
 			command: ''
 		});
 	}
+	const tooltip = member.cached
+		? `Raven verified this ${member.kind} before, and nothing it depends on has changed since.`
+		: lens.tooltip.replace('{kind}', member.kind);
 	return new vscode.CodeLens(toRange(member.range), {
 		title: lens.title,
-		tooltip: `${member.name}: ${lens.tooltip.replace('{kind}', member.kind)}`,
+		tooltip: `${member.name}: ${tooltip}`,
 		command: ''
 	});
 }

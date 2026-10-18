@@ -92,5 +92,88 @@ setInterval(() => {}, 1000);
 	}
 }
 
+// A Raven server (`raven --server`) that answers each request with its arguments. Its
+// first argument selects a behavior: `fail` exits with an error, `crash-once` ends the
+// first server it reaches, and `hang` never answers, after starting a solver.
+async function servers() {
+	if (process.platform === 'win32') {
+		console.log('Raven server checks skipped: fixture needs an executable script.');
+		return;
+	}
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'raven-servers-'));
+	const starts = path.join(dir, 'starts');
+	const crashed = path.join(dir, 'crashed');
+	const executable = path.join(dir, 'raven');
+	fs.writeFileSync(executable, `#!${process.execPath}
+const fs = require('fs');
+const { spawn } = require('child_process');
+fs.appendFileSync(${JSON.stringify(starts)}, process.pid + '\\n');
+let buffer = '';
+process.stdin.on('data', data => {
+	buffer += data;
+	let newline;
+	while ((newline = buffer.indexOf('\\n')) >= 0) {
+		const { id, cwd, args } = JSON.parse(buffer.slice(0, newline));
+		buffer = buffer.slice(newline + 1);
+		if (args[0] === 'crash-once' && !fs.existsSync(${JSON.stringify(crashed)})) {
+			fs.writeFileSync(${JSON.stringify(crashed)}, '');
+			process.exit(3);
+		}
+		if (args[0] === 'hang') {
+			const solver = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+			fs.writeFileSync(args[1], JSON.stringify([process.pid, solver.pid]));
+			continue;
+		}
+		const exit = args[0] === 'fail' ? 1 : 0;
+		process.stdout.write(JSON.stringify({ id, exit, stdout: JSON.stringify({ cwd, args }), stderr: exit ? 'failure' : '' }) + '\\n');
+	}
+});
+`);
+	fs.chmodSync(executable, 0o755);
+	const pool = new VerificationProcesses();
+	const started = () => fs.readFileSync(starts, 'utf8').trim().split('\n').map(Number);
+	const signal = new AbortController().signal;
+	try {
+		const echo = async args => JSON.parse(await pool.serve(executable, args, dir, process.env, signal));
+		assert.deepStrictEqual(await echo(['a']), { cwd: dir, args: ['a'] });
+		assert.deepStrictEqual(await echo(['b']), { cwd: dir, args: ['b'] });
+		assert.strictEqual(started().length, 1);
+		await assert.rejects(pool.serve(executable, ['fail'], dir, process.env, signal), /code 1: failure/);
+		assert.deepStrictEqual(await echo(['c']), { cwd: dir, args: ['c'] });
+		assert.strictEqual(started().length, 1);
+		console.log('  ok   a server answers several runs, also after a failed one');
+
+		assert.deepStrictEqual(await echo(['crash-once']), { cwd: dir, args: ['crash-once'] });
+		assert.strictEqual(started().length, 2);
+		await waitFor(() => !isRunning(started()[0]));
+		console.log('  ok   a server that dies is replaced, and the run tried again');
+
+		const controller = new AbortController();
+		const marker = path.join(dir, 'hung');
+		const hung = pool.serve(executable, ['hang', marker], dir, process.env, controller.signal).then(
+			() => { throw new Error('Cancelled run succeeded'); }, error => error);
+		await waitFor(() => fs.existsSync(marker));
+		const pids = JSON.parse(fs.readFileSync(marker));
+		controller.abort();
+		assert.match((await hung).message, /cancelled/);
+		await waitFor(() => pids.every(pid => !isRunning(pid)));
+		assert.deepStrictEqual(await echo(['d']), { cwd: dir, args: ['d'] });
+		assert.strictEqual(started().length, 3);
+		console.log('  ok   cancelling a run stops its server and solver, and the next run starts another');
+
+		const otherEnv = { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}` };
+		const previous = started()[2];
+		assert.deepStrictEqual(JSON.parse(await pool.serve(executable, ['e'], dir, otherEnv, signal)), { cwd: dir, args: ['e'] });
+		assert.strictEqual(started().length, 4);
+		await waitFor(() => !isRunning(previous));
+		await pool.stopServers();
+		await waitFor(() => !isRunning(started()[3]));
+		console.log('  ok   another environment gets its own server, and the old ones are stopped');
+	} finally {
+		await pool.stopServers();
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+}
+
 module.exports = { waitFor, isRunning };
-if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1; });
+if (require.main === module) main().then(servers).catch(error => { console.error(error); process.exitCode = 1; });

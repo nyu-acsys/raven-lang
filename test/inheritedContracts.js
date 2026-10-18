@@ -119,13 +119,15 @@ try {
 	emit('raven/inheritedContracts', {
 		uri: statusDocument.uri.toString(), version: statusDocument.version, runId: 1, contracts: [],
 		members: ['verified', 'failed', 'timeout', 'skipped', 'unknown'].map((status, line) =>
-			({ range: range(line), name: `p${line}`, kind: 'proc', status }))
+			({ range: range(line), name: `p${line}`, kind: 'proc', status, cached: line === 0 }))
 	});
 	const titles = (document, verify) => lenses(document).map(lens => lens.command.title)
 		.filter(title => title.startsWith('Verify') === verify);
 	assert.deepStrictEqual(titles(statusDocument, false), ['✓ verified', '✗ failed', '⏱ timed out', '– skipped']);
 	assert(lenses(statusDocument).find(lens => lens.command.title === '✗ failed')
 		.command.tooltip.startsWith('p1: Raven could not verify this proc'));
+	assert(lenses(statusDocument).find(lens => lens.command.title === '✓ verified')
+		.command.tooltip.startsWith('p0: Raven verified this proc before'));
 	assert.strictEqual(lenses(statusDocument).at(-1).command.title, '– skipped');
 	assert.deepStrictEqual(titles(statusDocument, true), Array(5).fill('Verify this'));
 	const verifyP2 = lenses(statusDocument).find(lens => lens.command.arguments?.[1] === 'p2');

@@ -20,6 +20,32 @@ async function main() {
 	const executable = path.join(dir, 'raven');
 	fs.writeFileSync(executable, `#!${process.execPath}
 const fs = require('fs');
+// As a server (protocol 4), each request is a run of this script in its own process.
+if (process.argv[2] === '--server') {
+	let buffer = '';
+	let previous = Promise.resolve();
+	const answer = line => new Promise(done => {
+		const { id, cwd, args } = JSON.parse(line);
+		const run = require('child_process').spawn(process.execPath, [__filename, ...args], { cwd });
+		let stdout = '', stderr = '';
+		run.stdout.on('data', data => { stdout += data; });
+		run.stderr.on('data', data => { stderr += data; });
+		run.on('close', code => {
+			process.stdout.write(JSON.stringify({ id, exit: code ?? 1, stdout, stderr }) + '\\n');
+			done();
+		});
+	});
+	process.stdin.on('data', data => {
+		buffer += data;
+		let newline;
+		while ((newline = buffer.indexOf('\\n')) >= 0) {
+			const line = buffer.slice(0, newline);
+			buffer = buffer.slice(newline + 1);
+			previous = previous.then(() => answer(line));
+		}
+	});
+	return;
+}
 const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + '\\n');
 const file = args[args.length - 1];
