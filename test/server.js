@@ -47,6 +47,10 @@ const visit = (text, base) => {
 visit(text, args[args.indexOf('--base-dir') + 1]);
 if (args.includes('--strict')) errors.push({ ...location, kind: 'Warning', message: ['Assumed termination'] });
 if (text.includes('VERIFY_ERROR') && !args.includes('--typeonly')) errors.push({ ...location, kind: 'Verification', message: ['Assertion failed'] });
+if (text.includes('CEX') && args.includes('--counterexamples')) {
+	errors.push({ ...location, kind: 'Verification', message: ['Assertion failed'] });
+	errors.push({ file: '', start_line: 0, start_col: -1, end_line: 0, end_col: -1, kind: 'Counterexample', certain: true, message: ['x = 3', 'CEX = 1'] });
+}
 if (text.includes('LIMIT') && !args.includes('--typeonly')) errors.push({ file: '', start_line: 0, start_col: -1, end_line: 0, end_col: -1, kind: 'Limit', message: ['Stopped after 7 errors'] });
 if (text.includes('TYPE_ERROR')) errors.push({ ...location, kind: 'Type', message: ['Type mismatch'] });
 if (text.includes('RELATED_ERROR') && !args.includes('--typeonly')) {
@@ -181,6 +185,7 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 		assert.strictEqual(initialized.capabilities.hoverProvider, true);
 		assert.strictEqual(initialized.capabilities.definitionProvider, true);
 		assert.strictEqual(initialized.capabilities.documentSymbolProvider, true);
+		assert.strictEqual(initialized.capabilities.inlayHintProvider, true);
 		send({ method: 'initialized', params: {} });
 		send({ method: 'textDocument/didOpen', params: { textDocument: { uri, languageId: 'raven', version: 1, text: 'program' } } });
 		const initialRunning = waitForState(uri, 'running');
@@ -419,6 +424,18 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 		send({ method: 'textDocument/didClose', params: { textDocument: { uri: focusUri } } });
 		send({ method: 'raven/executable', params: { executable, lspProtocol: 3 } });
 		console.log('  ok   a focus is verified alone across edits until cleared, and dropped when its name is gone');
+
+		send({ method: 'raven/executable', params: { executable, lspProtocol: 4 } });
+		const cexUri = pathToFileURL(path.join(dir, 'cex.rav')).toString();
+		send({ method: 'textDocument/didOpen', params: { textDocument: { uri: cexUri, languageId: 'raven', version: 1, text: 'line one\nCEX failing' } } });
+		const cexDiagnostics = await diagnostics(cexUri);
+		assert.deepStrictEqual(cexDiagnostics.map(d => d.message), ['[Verification Error] Assertion failed']);
+		assert(calls().at(-1).includes('--counterexamples') && !calls().at(-2).includes('--counterexamples'));
+		const hints = await request('textDocument/inlayHint', { textDocument: { uri: cexUri }, range: { start: { line: 0, character: 0 }, end: { line: 2, character: 0 } } });
+		assert.deepStrictEqual(hints.map(h => [h.position, h.label]), [[{ line: 1, character: 5 }, 'CEX = 1']]);
+		send({ method: 'textDocument/didClose', params: { textDocument: { uri: cexUri } } });
+		send({ method: 'raven/executable', params: { executable, lspProtocol: 3 } });
+		console.log('  ok   counterexamples come with failures from protocol 4 on, as inlay hints and not as diagnostics');
 
 		const membersUri = pathToFileURL(path.join(dir, 'members.rav')).toString();
 		send({ method: 'textDocument/didOpen', params: { textDocument: { uri: membersUri, languageId: 'raven', version: 1, text: 'MEMBERS' } } });

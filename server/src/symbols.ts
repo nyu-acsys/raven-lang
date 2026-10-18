@@ -6,7 +6,7 @@
  * ------------------------------------------------------------------------------------------ */
 
 import { SymbolKind } from 'vscode-languageserver/node';
-import type { DocumentSymbol, Hover, Location, Position, Range } from 'vscode-languageserver/node';
+import type { DocumentSymbol, Hover, InlayHint, Location, Position, Range } from 'vscode-languageserver/node';
 
 export interface SymbolInfo { name: string, kind: string, detail?: string, location: Location }
 
@@ -33,8 +33,15 @@ function unchangedLines(old: string[], current: string[]): { prefix: number, suf
 	return { prefix, suffix };
 }
 
+/** The line of [current] that each line of the checked version [old] is, if unchanged. */
+function lineMap(old: string[], current: string[]): (line: number) => number | undefined {
+	const { prefix, suffix } = unchangedLines(old, current);
+	return line => line < prefix ? line
+		: line >= old.length - suffix ? line + (current.length - old.length) : undefined;
+}
+
 /** The line of the checked version that [line] of [current] is, if unchanged. */
-function toCheckedLine(table: SymbolTable, current: string[], line: number): number | undefined {
+function toCheckedLine(table: { lines: string[] }, current: string[], line: number): number | undefined {
 	const { prefix, suffix } = unchangedLines(table.lines, current);
 	if (line < prefix) return line;
 	if (line >= current.length - suffix) return line - (current.length - table.lines.length);
@@ -62,6 +69,11 @@ function referenceAt(table: SymbolTable, text: string, position: Position) {
 		end: { line: position.line, character: reference.range.end.character }
 	};
 	return { range, symbol: table.symbols[reference.symbol], current };
+}
+
+/** What the name at [position] of the current version of the document, [text], refers to. */
+export function symbolAt(table: SymbolTable, text: string, position: Position): SymbolInfo | undefined {
+	return referenceAt(table, text, position)?.symbol;
 }
 
 export function hoverAt(table: SymbolTable, text: string, position: Position): Hover | undefined {
@@ -127,9 +139,7 @@ export function outlineOf(outline: Outline, text: string): DocumentSymbol[] {
 	const current = text.split('\n');
 	const { prefix, suffix } = unchangedLines(outline.lines, current);
 	const changedEnd = Math.max(prefix, current.length - suffix - 1);
-	const map = (line: number) => line < prefix ? line
-		: line >= outline.lines.length - suffix ? line + (current.length - outline.lines.length)
-			: undefined;
+	const map = lineMap(outline.lines, current);
 	const symbols = new Map<string, DocumentSymbol>();
 	const roots: DocumentSymbol[] = [];
 	for (const entry of outline.entries) {
@@ -167,4 +177,83 @@ export function outlineOf(outline: Outline, text: string): DocumentSymbol[] {
 	const sort = (list: DocumentSymbol[]) => { list.sort(byPosition); list.forEach(s => sort(s.children!)); };
 	sort(roots);
 	return roots;
+}
+
+/** The values of a counterexample to the failure at [range], in the checked version. */
+export interface CounterexampleEntry {
+	range: Range,
+	certain: boolean,
+	values: { name: string, value: string }[]
+}
+
+export interface Counterexamples { version: number, lines: string[], entries: CounterexampleEntry[] }
+
+/** The values Raven reports for an entry of kind Counterexample, one `name = value` a line. */
+export function counterexampleValues(message: string[]): { name: string, value: string }[] {
+	return message.flatMap(line => {
+		const at = line.indexOf(' = ');
+		return at > 0 ? [{ name: line.slice(0, at), value: line.slice(at + 3) }] : [];
+	});
+}
+
+/** The variables and fields such as `r.f` that [text] mentions. */
+function mentioned(text: string): Set<string> {
+	return new Set(text.match(/[A-Za-z_][A-Za-z0-9_']*(\.[A-Za-z_][A-Za-z0-9_']*)?/g) ?? []);
+}
+
+/**
+ * Inlay hints at the end of each failure on a line unchanged since the check, with the
+ * values of what it mentions, or of all variables if it mentions none of them, and the
+ * whole counterexample in its tooltip. The editor shortens long hints
+ * (`editor.inlayHints.maximumLength`).
+ */
+export function inlayHintsOf(counterexamples: Counterexamples, text: string): InlayHint[] {
+	const current = text.split('\n');
+	const map = lineMap(counterexamples.lines, current);
+	return counterexamples.entries.flatMap(entry => {
+		const start = map(entry.range.start.line);
+		const end = map(entry.range.end.line);
+		if (start === undefined || end === undefined) return [];
+		const failing = current.slice(start, end + 1).join('\n');
+		const names = mentioned(failing);
+		const shown = entry.values.filter(v => names.has(v.name));
+		const label = (shown.length > 0 ? shown : entry.values).map(v => `${v.name} = ${v.value}`).join(', ');
+		const note = entry.certain
+			? '**Counterexample**: values for which the check fails.'
+			: '**Possible counterexample**: the solver could not decide the check, so these values may contradict quantified facts.';
+		return [{
+			position: { line: end, character: entry.range.end.character },
+			label: entry.certain ? label : `possibly ${label}`,
+			paddingLeft: true,
+			tooltip: {
+				kind: 'markdown',
+				value: `${note}\n\n\`\`\`\n${entry.values.map(v => `${v.name} = ${v.value}`).join('\n')}\n\`\`\``
+			}
+		}];
+	});
+}
+
+const CALLABLE_KINDS = new Set(['proc', 'lemma', 'func', 'pred', 'inv']);
+
+/**
+ * The value of the variable [name] at a failure in the callable that [position] of the
+ * current version, [text], is in, from the counterexamples and the [outline] of the check.
+ */
+export function counterexampleValue(counterexamples: Counterexamples, outline: Outline | undefined,
+	text: string, position: Position, name: string): { line: number, value: string, certain: boolean } | undefined {
+	const current = text.split('\n');
+	const line = toCheckedLine(counterexamples, current, position.line);
+	if (line === undefined) return undefined;
+	const within = (range: Range, l: number) => range.start.line <= l && l <= range.end.line;
+	const callables = (outline?.entries ?? []).filter(e => CALLABLE_KINDS.has(e.kind));
+	const callable = callables.filter(e => within(e.range, line))
+		.sort((a, b) => (a.range.end.line - a.range.start.line) - (b.range.end.line - b.range.start.line))[0];
+	if (!callable) return undefined;
+	for (const entry of counterexamples.entries) {
+		if (!within(callable.range, entry.range.start.line)) continue;
+		const value = entry.values.find(v => v.name === name);
+		const failure = lineMap(counterexamples.lines, current)(entry.range.start.line);
+		if (value && failure !== undefined) return { line: failure, value: value.value, certain: entry.certain };
+	}
+	return undefined;
 }

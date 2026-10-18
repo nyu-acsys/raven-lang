@@ -29,7 +29,10 @@ import {
 } from 'vscode-languageserver-textdocument';
 import { URI, Utils } from 'vscode-uri';
 import { VerificationProcesses } from './verificationProcesses';
-import { Outline, SymbolTable, definitionAt, hoverAt, outlineOf } from './symbols';
+import {
+	Counterexamples, CounterexampleEntry, Outline, SymbolTable, counterexampleValue, counterexampleValues,
+	definitionAt, hoverAt, inlayHintsOf, outlineOf, symbolAt
+} from './symbols';
 import { match } from "ts-pattern";
 import * as tmp from 'tmp';
 import * as fs from "fs";
@@ -123,6 +126,7 @@ connection.onInitialize((params: InitializeParams) => {
 			hoverProvider: true,
 			definitionProvider: true,
 			documentSymbolProvider: true,
+			inlayHintProvider: true,
 			diagnosticProvider: {
 				interFileDependencies: true,
 				workspaceDiagnostics: false
@@ -271,6 +275,7 @@ let nextRunId = 0;
 documents.onDidClose(e => {
 	symbolTables.delete(e.document.uri);
 	outlines.delete(e.document.uri);
+	counterexampleTables.delete(e.document.uri);
 	focusedNames.delete(e.document.uri);
 	documentSettings.delete(e.document.uri);
 	documentDependencies.delete(e.document.uri);
@@ -323,10 +328,33 @@ interface RavenAnnotation extends RavenLocation {
 /** The names each open document uses, from its latest check (protocol 4). */
 const symbolTables = new Map<string, SymbolTable>();
 
+/** The counterexamples to each open document's failures, from its latest check. */
+const counterexampleTables = new Map<string, Counterexamples>();
+
 connection.onHover(params => {
 	const table = symbolTables.get(params.textDocument.uri);
 	const document = documents.get(params.textDocument.uri);
-	return table && document ? hoverAt(table, document.getText(), params.position) ?? null : null;
+	if (!table || !document) return null;
+	const hover = hoverAt(table, document.getText(), params.position);
+	const counterexamples = counterexampleTables.get(params.textDocument.uri);
+	const symbol = hover && symbolAt(table, document.getText(), params.position);
+	if (!hover || !counterexamples || symbol?.kind !== 'variable') return hover ?? null;
+	// A variable's value where its callable fails, below its declaration.
+	const found = counterexampleValue(counterexamples, outlines.get(params.textDocument.uri),
+		document.getText(), params.position, symbol.name);
+	if (!found) return hover;
+	const contents = hover.contents as { kind: 'markdown', value: string };
+	const label = found.certain ? 'Counterexample' : 'Possible counterexample';
+	return {
+		...hover,
+		contents: { kind: 'markdown', value: `${contents.value}\n\n${label}: \`${symbol.name} = ${found.value}\` at the failure on line ${found.line + 1}` }
+	};
+});
+
+connection.languages.inlayHint.on(params => {
+	const counterexamples = counterexampleTables.get(params.textDocument.uri);
+	const document = documents.get(params.textDocument.uri);
+	return counterexamples && document ? inlayHintsOf(counterexamples, document.getText()) : null;
 });
 
 connection.onDefinition(params => {
@@ -561,7 +589,7 @@ async function validateTextDocument(
 			if (!Array.isArray(output) && Array.isArray(output.members)) {
 				memberNames = output.members.map((m: { name: string }) => m.name);
 			}
-			failed = errors.some(e => e.kind !== "RelatedLoc" && e.kind !== "Warning" && e.kind !== "Limit");
+			failed = errors.some(e => !["RelatedLoc", "Warning", "Limit", "Counterexample"].includes(e.kind));
 
 			// Raven reports every location in whatever file it is really in: the temporary
 			// copy of this document, a file reached through `include`, or one of its own
@@ -599,6 +627,7 @@ async function validateTextDocument(
 			// outright (`diagnostics.pop()` on an empty array), so buffer them and attach
 			// them to the next error instead.
 			let pendingRelated: DiagnosticRelatedInformation[] = [];
+			const counterexamples: CounterexampleEntry[] = [];
 			let previousError: Diagnostic | undefined;
 
 			// Underlines for related locations that fall inside this document, collected
@@ -622,7 +651,14 @@ async function validateTextDocument(
 
 				const msg = err.message.join("\n");
 
-				if (err.kind === "Limit") {
+				if (err.kind === "Counterexample") {
+					// Protocol 4: the values for which the error before it occurs.
+					if (previousError) counterexamples.push({
+						range: previousError.range,
+						certain: (err as { certain?: boolean }).certain === true,
+						values: counterexampleValues(err.message)
+					});
+				} else if (err.kind === "Limit") {
 					// Protocol 4: Raven stopped after the maximal number of errors.
 					diagnostics.push({
 						severity: DiagnosticSeverity.Information,
@@ -728,6 +764,9 @@ async function validateTextDocument(
 				}))
 			});
 		}
+		if (isCurrent() && !Array.isArray(output)) counterexampleTables.set(textDocument.uri, {
+			version: textDocument.version, lines: textDocument.getText().split('\n'), entries: counterexamples
+		});
 		const outlined = memberStatuses.filter(m => m.extent && !m.inherited && uriForError(m) === textDocument.uri);
 		if (outlined.length > 0 && isCurrent()) outlines.set(textDocument.uri, {
 			version: textDocument.version,
@@ -782,7 +821,11 @@ async function validateTextDocument(
 		if (!isCurrent()) throw new ResponseError(LSPErrorCodes.ServerCancelled, 'Verification superseded', { retriggerRequest: true });
 		// Protocol 4: verify only the focus, if there is one.
 		const focus = protocol >= 4 ? focusedNames.get(textDocument.uri) : undefined;
-		const result = resultFor(await check(focus ? ["--only", focus] : []));
+		// Protocol 4: failures come with counterexamples.
+		const result = resultFor(await check([
+			...(protocol >= 4 ? ["--counterexamples"] : []),
+			...(focus ? ["--only", focus] : [])
+		]));
 		if (strict && protocol < 3) {
 			result.state = 'unavailable';
 			result.message = 'Strict-mode diagnostics require a Raven verifier supporting LSP protocol 3 or later.';
