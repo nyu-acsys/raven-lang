@@ -5,7 +5,8 @@
  * is mapped to that version, and other positions have no answer until the next check.
  * ------------------------------------------------------------------------------------------ */
 
-import type { Hover, Location, Position, Range } from 'vscode-languageserver/node';
+import { SymbolKind } from 'vscode-languageserver/node';
+import type { DocumentSymbol, Hover, Location, Position, Range } from 'vscode-languageserver/node';
 
 export interface SymbolInfo { name: string, kind: string, detail?: string, location: Location }
 
@@ -91,4 +92,79 @@ export function definitionAt(table: SymbolTable, uri: string, text: string, posi
 			end: { line: end, character: location.range.end.character }
 		}
 	};
+}
+
+/** A member, module or named assertion as the outline shows it (protocol 4). */
+export interface OutlineEntry {
+	name: string,
+	kind: string,
+	status?: string,
+	/** Its name, and its whole text, in the checked version. */
+	selection: Range,
+	range: Range
+}
+
+export interface Outline { version: number, lines: string[], entries: OutlineEntry[] }
+
+const OUTLINE_KINDS: Record<string, SymbolKind> = {
+	module: SymbolKind.Module, interface: SymbolKind.Interface, instance: SymbolKind.Module,
+	proc: SymbolKind.Method, lemma: SymbolKind.Method, axiom: SymbolKind.Method,
+	func: SymbolKind.Function, pred: SymbolKind.Function, inv: SymbolKind.Function,
+	field: SymbolKind.Field, type: SymbolKind.Struct, val: SymbolKind.Constant,
+	assertion: SymbolKind.Property, invariant: SymbolKind.Property
+};
+
+const STATUS_DETAILS: Record<string, string> = {
+	verified: '✓ verified', failed: '✗ failed', timeout: '⏱ timed out', skipped: '– skipped'
+};
+
+/**
+ * The outline of the current version of the document, [text]: each entry under the one
+ * whose qualified name its own extends. An entry whose name is on a line changed since
+ * the check is left out, and one whose end is on such a line ends at the last of them.
+ */
+export function outlineOf(outline: Outline, text: string): DocumentSymbol[] {
+	const current = text.split('\n');
+	const { prefix, suffix } = unchangedLines(outline.lines, current);
+	const changedEnd = Math.max(prefix, current.length - suffix - 1);
+	const map = (line: number) => line < prefix ? line
+		: line >= outline.lines.length - suffix ? line + (current.length - outline.lines.length)
+			: undefined;
+	const symbols = new Map<string, DocumentSymbol>();
+	const roots: DocumentSymbol[] = [];
+	for (const entry of outline.entries) {
+		const start = map(entry.selection.start.line);
+		const rangeStart = map(entry.range.start.line);
+		if (start === undefined || rangeStart === undefined) continue;
+		const at = (line: number, character: number) => ({ line, character });
+		const symbol: DocumentSymbol = {
+			name: entry.name.slice(entry.name.lastIndexOf('.') + 1),
+			detail: (entry.status && STATUS_DETAILS[entry.status]) ?? entry.kind,
+			kind: OUTLINE_KINDS[entry.kind] ?? SymbolKind.Object,
+			selectionRange: {
+				start: at(start, entry.selection.start.character),
+				end: at(start + entry.selection.end.line - entry.selection.start.line, entry.selection.end.character)
+			},
+			range: {
+				start: at(rangeStart, entry.range.start.character),
+				end: at(map(entry.range.end.line) ?? changedEnd, entry.range.end.character)
+			},
+			children: []
+		};
+		symbols.set(entry.name, symbol);
+	}
+	// Parents first: a name is longer than any it extends.
+	for (const name of [...symbols.keys()].sort((a, b) => a.length - b.length)) {
+		const symbol = symbols.get(name)!;
+		let parent: DocumentSymbol | undefined;
+		for (let i = name.lastIndexOf('.'); i > 0 && !parent; i = name.lastIndexOf('.', i - 1)) {
+			parent = symbols.get(name.slice(0, i));
+		}
+		(parent ? parent.children! : roots).push(symbol);
+	}
+	const byPosition = (a: DocumentSymbol, b: DocumentSymbol) =>
+		a.range.start.line - b.range.start.line || a.range.start.character - b.range.start.character;
+	const sort = (list: DocumentSymbol[]) => { list.sort(byPosition); list.forEach(s => sort(s.children!)); };
+	sort(roots);
+	return roots;
 }

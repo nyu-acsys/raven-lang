@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ravenServer.smtTimeout` sets the time limit of the SMT solver.
 - Hovers show the declaration of a name, and Go to Definition jumps to it (LSP protocol 4).
 - **Verify this** verifies only one member or named assertion until **Verify all** (LSP protocol 4).
+- The Outline view, breadcrumbs and Go to Symbol list modules, members and named assertions (LSP protocol 4).
 
 ### Changed
 

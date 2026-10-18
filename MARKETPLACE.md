@@ -15,6 +15,7 @@ New to Raven? **[nyu-acsys.github.io/raven](https://nyu-acsys.github.io/raven/)*
 - **Diagnostics**: Errors and warnings shown in the editor and Problems panel, with related locations and optional gutter icons.
 - **Inherited Contracts**: View inherited contracts above callable headers and on hover, and inherited module members on hover.
 - **Hover and Go to Definition**: See the declaration of a name on hover, and jump to it, including into the standard library.
+- **Outline**: Modules, members and named assertions and invariants in the Outline view, breadcrumbs and **Go to Symbol in Editor**, with their verification status.
 - **Verification Status**: See above each procedure, lemma, function and module whether it verified, failed or timed out.
 
 ## Prerequisites

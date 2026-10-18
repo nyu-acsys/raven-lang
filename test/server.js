@@ -67,7 +67,8 @@ if ((text.includes('BLOCK_TYPE') && args.includes('--typeonly'))
 	setInterval(() => {}, 1000);
 	return;
 }
-const members = text.includes('FOCUS') ? [{ ...location, name: 'M.p', kind: 'proc' }]
+const extent = { start_line: 2, start_col: 1, end_line: 2, end_col: 5 };
+const members = text.includes('FOCUS') ? [{ ...location, name: 'M.p', kind: 'proc', extent }]
 	: text.includes('MEMBERS') && !args.includes('--typeonly') ? [
 	{ ...location, name: 'M.p', kind: 'proc', status: 'verified' },
 	{ ...location, file: 'other.rav', name: 'q', kind: 'lemma', status: 'failed' }
@@ -179,6 +180,7 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 		});
 		assert.strictEqual(initialized.capabilities.hoverProvider, true);
 		assert.strictEqual(initialized.capabilities.definitionProvider, true);
+		assert.strictEqual(initialized.capabilities.documentSymbolProvider, true);
 		send({ method: 'initialized', params: {} });
 		send({ method: 'textDocument/didOpen', params: { textDocument: { uri, languageId: 'raven', version: 1, text: 'program' } } });
 		const initialRunning = waitForState(uri, 'running');
@@ -407,6 +409,8 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 		assert.deepStrictEqual(await diagnostics(focusUri), []);
 		assert(!calls().at(-1).includes('--only'));
 		assert.strictEqual(stateUpdates.at(-1).focus, undefined);
+		const outline = await request('textDocument/documentSymbol', { textDocument: { uri: focusUri } });
+		assert.deepStrictEqual(outline.map(symbol => [symbol.name, symbol.detail]), [['p', 'proc']]);
 		send({ method: 'raven/focus', params: { uri: focusUri, name: 'M.p' } });
 		await diagnostics(focusUri);
 		send({ method: 'raven/focus', params: { uri: focusUri } });

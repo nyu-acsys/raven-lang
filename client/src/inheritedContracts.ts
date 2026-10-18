@@ -32,7 +32,7 @@ interface MemberStatus {
 	range: vscode.Range,
 	name: string,
 	kind: string,
-	status: string,
+	status?: string,
 	/** For a module or interface: how many of its members have each status. */
 	counts?: Record<string, number>,
 	/** Whether a module inherits it; it is then located at the module. */
@@ -57,7 +57,7 @@ const STATUS_LENSES: Record<string, { title: string, tooltip: string }> = {
 };
 
 /** The kinds of members that can be verified on their own. */
-const VERIFIABLE = new Set(['proc', 'lemma', 'func', 'pred', 'inv', 'module', 'interface', 'assertion']);
+const VERIFIABLE = new Set(['proc', 'lemma', 'func', 'pred', 'inv', 'module', 'interface', 'assertion', 'invariant']);
 
 /**
  * The code lens that verifies only [member] from now on, or, if it is the [focus], all of

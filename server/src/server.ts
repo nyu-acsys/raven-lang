@@ -29,7 +29,7 @@ import {
 } from 'vscode-languageserver-textdocument';
 import { URI, Utils } from 'vscode-uri';
 import { VerificationProcesses } from './verificationProcesses';
-import { SymbolTable, definitionAt, hoverAt } from './symbols';
+import { Outline, SymbolTable, definitionAt, hoverAt, outlineOf } from './symbols';
 import { match } from "ts-pattern";
 import * as tmp from 'tmp';
 import * as fs from "fs";
@@ -122,6 +122,7 @@ connection.onInitialize((params: InitializeParams) => {
 			// Answered from the names Raven reports (protocol 4); see symbols.ts.
 			hoverProvider: true,
 			definitionProvider: true,
+			documentSymbolProvider: true,
 			diagnosticProvider: {
 				interFileDependencies: true,
 				workspaceDiagnostics: false
@@ -269,6 +270,7 @@ let nextRunId = 0;
 // Only keep settings for open documents
 documents.onDidClose(e => {
 	symbolTables.delete(e.document.uri);
+	outlines.delete(e.document.uri);
 	focusedNames.delete(e.document.uri);
 	documentSettings.delete(e.document.uri);
 	documentDependencies.delete(e.document.uri);
@@ -334,6 +336,15 @@ connection.onDefinition(params => {
 		? definitionAt(table, document.uri, document.getText(), params.position) ?? null : null;
 });
 
+/** The members, modules and named assertions of each open document, from its latest check. */
+const outlines = new Map<string, Outline>();
+
+connection.onDocumentSymbol(params => {
+	const outline = outlines.get(params.textDocument.uri);
+	const document = documents.get(params.textDocument.uri);
+	return outline && document ? outlineOf(outline, document.getText()) : null;
+});
+
 /** A use of a name, in the document Raven checked, and a symbol it refers to (protocol 4). */
 interface RavenReference { line: number, start_col: number, end_col: number, symbol: number }
 interface RavenSymbol { name: string, kind: string, definition: RavenLocation, detail?: string }
@@ -344,12 +355,13 @@ interface RavenSymbol { name: string, kind: string, definition: RavenLocation, d
  * inherits, such as a lemma for an axiom of its interface, is located at the module.
  */
 interface RavenMemberStatus extends RavenLocation {
-	name: string, kind: string, status: string, counts?: Record<string, number>, inherited?: boolean
+	name: string, kind: string, status?: string, counts?: Record<string, number>, inherited?: boolean,
+	extent?: { start_line: number, start_col: number, end_line: number, end_col: number }
 }
 
 /** What the client shows above a member that was verified. */
 interface MemberStatus {
-	range: Range, name: string, kind: string, status: string, counts?: Record<string, number>,
+	range: Range, name: string, kind: string, status?: string, counts?: Record<string, number>,
 	inherited?: boolean
 }
 
@@ -716,6 +728,14 @@ async function validateTextDocument(
 				}))
 			});
 		}
+		const outlined = memberStatuses.filter(m => m.extent && !m.inherited && uriForError(m) === textDocument.uri);
+		if (outlined.length > 0 && isCurrent()) outlines.set(textDocument.uri, {
+			version: textDocument.version,
+			lines: textDocument.getText().split('\n'),
+			entries: outlined.map(m => ({
+				name: m.name, kind: m.kind, status: m.status, selection: rangeOf(m), range: rangeOf(m.extent!)
+			}))
+		});
 		const members: MemberStatus[] = memberStatuses
 			.filter(m => uriForError(m) === textDocument.uri)
 			.map(m => ({
