@@ -153,7 +153,21 @@ try {
 		['Verify this', '✗ 2 failed, 1 timed out, 9 verified']);
 	assert(lenses(statusDocument).at(-1).command.tooltip.endsWith('Inherited:\n✗ failed: lemma compCommute'));
 	console.log('  ok   code lenses show the status of members, ignoring unknown ones, and summarize modules');
-	console.log('  ok   members and modules get a Verify this lens, and the focus a Verify all one');
+	emit('raven/inheritedContracts', {
+		uri: statusDocument.uri.toString(), version: statusDocument.version, runId: 1, contracts: [],
+		members: [
+			{ range: range(0), name: 'L', kind: 'module' },
+			{ range: range(1), name: 'L.lseg', kind: 'pred' },
+			{ range: range(2), name: 'L.valid', kind: 'pred', status: 'verified' },
+			{ range: range(3), name: 'L.len', kind: 'func', checked: true },
+			{ range: range(4), name: 'L.free_fn', kind: 'func' },
+			{ range: range(5), name: 'N', kind: 'module' },
+			{ range: range(6), name: 'N.f', kind: 'field' }
+		]
+	});
+	assert.deepStrictEqual(lenses(statusDocument).filter(lens => lens.command.title === 'Verify this')
+		.map(lens => lens.command.arguments[1]), ['L', 'L.valid', 'L.len']);
+	console.log('  ok   members and modules get a Verify this lens if there is something to verify, and the focus a Verify all one');
 
 	let refreshes = 0;
 	context.subscriptions.push(providers.lenses.onDidChangeCodeLenses(() => refreshes++));

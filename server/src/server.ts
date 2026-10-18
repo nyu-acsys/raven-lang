@@ -392,13 +392,13 @@ interface RavenSymbol { name: string, kind: string, definition: RavenLocation, d
  */
 interface RavenMemberStatus extends RavenLocation {
 	name: string, kind: string, status?: string, counts?: Record<string, number>, inherited?: boolean,
-	extent?: { start_line: number, start_col: number, end_line: number, end_col: number }
+	checked?: boolean, extent?: { start_line: number, start_col: number, end_line: number, end_col: number }
 }
 
 /** What the client shows above a member that was verified. */
 interface MemberStatus {
 	range: Range, name: string, kind: string, status?: string, counts?: Record<string, number>,
-	inherited?: boolean
+	inherited?: boolean, checked?: boolean
 }
 
 /** What the client shows for a module that inherits members. */
@@ -798,7 +798,7 @@ async function validateTextDocument(
 			.filter(m => uriForError(m) === textDocument.uri)
 			.map(m => ({
 				range: rangeOf(m), name: m.name, kind: m.kind, status: m.status, counts: m.counts,
-				inherited: m.inherited
+				inherited: m.inherited, checked: m.checked
 			}));
 		reportAnnotations(contracts, modules, members);
 		} catch (error) {

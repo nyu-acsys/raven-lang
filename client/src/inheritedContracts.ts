@@ -36,7 +36,9 @@ interface MemberStatus {
 	/** For a module or interface: how many of its members have each status. */
 	counts?: Record<string, number>,
 	/** Whether a module inherits it; it is then located at the module. */
-	inherited?: boolean
+	inherited?: boolean,
+	/** Whether it is known to be checked before it is verified. */
+	checked?: boolean
 }
 
 interface InheritedAnnotations {
@@ -56,8 +58,20 @@ const STATUS_LENSES: Record<string, { title: string, tooltip: string }> = {
 	skipped: { title: '– skipped', tooltip: 'Raven stopped before checking this {kind}, after reaching the error limit.' }
 };
 
-/** The kinds of members that can be verified on their own. */
-const VERIFIABLE = new Set(['proc', 'lemma', 'func', 'pred', 'inv', 'module', 'interface', 'assertion', 'invariant']);
+/**
+ * Whether there is something to verify in [member]: if it is known to be checked, or has a
+ * status, as a predicate does whose validity is checked; a named assertion or invariant;
+ * or a module or interface with such a member.
+ */
+function hasObligations(member: MemberStatus, members: MemberStatus[]): boolean {
+	if (member.inherited) return false;
+	if (member.kind === 'module' || member.kind === 'interface') {
+		return member.status !== undefined || members.some(m => m.name.startsWith(`${member.name}.`)
+			&& m.kind !== 'module' && m.kind !== 'interface' && hasObligations(m, members));
+	}
+	return member.checked === true || member.status !== undefined
+		|| member.kind === 'assertion' || member.kind === 'invariant';
+}
 
 /**
  * The code lens that verifies only [member] from now on, or, if it is the [focus], all of
@@ -228,7 +242,7 @@ export function registerInheritedContracts(context: vscode.ExtensionContext, cli
 			const statuses = members.map(member => statusLens(member, members))
 				.filter((lens): lens is vscode.CodeLens => lens !== undefined);
 			const focus = focuses.get(document.uri.toString());
-			const verify = members.filter(m => VERIFIABLE.has(m.kind) && !m.inherited)
+			const verify = members.filter(m => hasObligations(m, members))
 				.map(m => verifyLens(document.uri.toString(), m, focus));
 			// The status last: it disappears while a member is rechecked, which moves
 			// nothing then.
