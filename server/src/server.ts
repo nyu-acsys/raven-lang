@@ -31,7 +31,7 @@ import { URI, Utils } from 'vscode-uri';
 import { VerificationProcesses } from './verificationProcesses';
 import {
 	Counterexamples, CounterexampleEntry, Outline, SymbolTable, counterexampleValue, counterexampleValues,
-	definitionAt, hoverAt, inlayHintsOf, outlineOf, symbolAt
+	definitionAt, hoverAt, inlayHintsOf, outlineOf, symbolAt, valueName
 } from './symbols';
 import { match } from "ts-pattern";
 import * as tmp from 'tmp';
@@ -45,6 +45,8 @@ const documents = new TextDocuments(TextDocument);
 let hasConfigurationCapability = false;
 let hasWorkspaceFolderCapability = false;
 let hasDiagnosticRelatedInformationCapability = false;
+/** Whether the client asks for inlay hints again when told they changed. */
+let hasInlayHintRefreshCapability = false;
 
 // Which verifier to run, and where to find the z3 it needs. Decided entirely by the
 // client -- see client/src/ravenBinary.ts -- because the answer now depends on which
@@ -113,6 +115,7 @@ connection.onInitialize((params: InitializeParams) => {
 	hasWorkspaceFolderCapability = !!(
 		capabilities.workspace && !!capabilities.workspace.workspaceFolders
 	);
+	hasInlayHintRefreshCapability = !!capabilities.workspace?.inlayHint?.refreshSupport;
 	hasDiagnosticRelatedInformationCapability = !!(
 		capabilities.textDocument &&
 		capabilities.textDocument.publishDiagnostics &&
@@ -338,16 +341,19 @@ connection.onHover(params => {
 	const hover = hoverAt(table, document.getText(), params.position);
 	const counterexamples = counterexampleTables.get(params.textDocument.uri);
 	const symbol = hover && symbolAt(table, document.getText(), params.position);
-	if (!hover || !counterexamples || symbol?.kind !== 'variable') return hover ?? null;
-	// A variable's value where its callable fails, below its declaration.
+	if (!hover || !counterexamples || !symbol || !hover.range) return hover ?? null;
+	// The value of a variable, or of a field of one, where its callable fails.
+	const name = valueName(symbol, document.getText().split('\n')[hover.range.start.line] ?? '',
+		hover.range.start.character);
+	if (!name) return hover;
 	const found = counterexampleValue(counterexamples, outlines.get(params.textDocument.uri),
-		document.getText(), params.position, symbol.name);
+		document.getText(), params.position, name);
 	if (!found) return hover;
 	const contents = hover.contents as { kind: 'markdown', value: string };
 	const label = found.certain ? 'Counterexample' : 'Possible counterexample';
 	return {
 		...hover,
-		contents: { kind: 'markdown', value: `${contents.value}\n\n${label}: \`${symbol.name} = ${found.value}\` at the failure on line ${found.line + 1}` }
+		contents: { kind: 'markdown', value: `${contents.value}\n\n${label}: \`${name} = ${found.value}\` at the failure on line ${found.line + 1}` }
 	};
 });
 
@@ -764,9 +770,14 @@ async function validateTextDocument(
 				}))
 			});
 		}
-		if (isCurrent() && !Array.isArray(output)) counterexampleTables.set(textDocument.uri, {
-			version: textDocument.version, lines: textDocument.getText().split('\n'), entries: counterexamples
-		});
+		if (isCurrent() && !Array.isArray(output)) {
+			counterexampleTables.set(textDocument.uri, {
+				version: textDocument.version, lines: textDocument.getText().split('\n'), entries: counterexamples
+			});
+			// The editor asked for inlay hints when the document changed, before the check
+			// had any; it asks again only when told to.
+			if (hasInlayHintRefreshCapability) connection.languages.inlayHint.refresh();
+		}
 		const outlined = memberStatuses.filter(m => m.extent && !m.inherited && uriForError(m) === textDocument.uri);
 		if (outlined.length > 0 && isCurrent()) outlines.set(textDocument.uri, {
 			version: textDocument.version,

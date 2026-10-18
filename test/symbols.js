@@ -6,7 +6,7 @@
  */
 
 const assert = require('assert');
-const { hoverAt, definitionAt, outlineOf, inlayHintsOf, counterexampleValue, counterexampleValues } = require('../server/out/symbols');
+const { hoverAt, definitionAt, outlineOf, inlayHintsOf, counterexampleValue, counterexampleValues, valueName } = require('../server/out/symbols');
 
 const uri = 'file:///tests/main.rav';
 const range = (line, start, end) => ({ start: { line, character: start }, end: { line, character: end } });
@@ -86,7 +86,7 @@ const counterexamples = {
 	lines: failing,
 	entries: [{
 		range: range(2, 9, 16), certain: false,
-		values: counterexampleValues(['x = 3', 'y = 6', 'r = ref#1', 'r.f = 7 (permission 1)', 'not a value'])
+		values: counterexampleValues(['x = 3', 'y = 6', 'r = Ref#1', 'r.f = 7 (permission 1)', 'not a value'])
 	}]
 };
 assert.deepStrictEqual(counterexamples.entries[0].values.map(v => v.name), ['x', 'y', 'r', 'r.f']);
@@ -94,11 +94,11 @@ const [hint] = inlayHintsOf(counterexamples, text(failing));
 assert.deepStrictEqual(hint.position, { line: 2, character: 16 });
 assert.strictEqual(hint.label, 'possibly y = 6, r.f = 7 (permission 1)');
 assert(hint.tooltip.value.startsWith('**Possible counterexample**'));
-assert(hint.tooltip.value.endsWith('```\nx = 3\ny = 6\nr = ref#1\nr.f = 7 (permission 1)\n```'));
+assert(hint.tooltip.value.endsWith('```\nx = 3\ny = 6\nr = Ref#1\nr.f = 7 (permission 1)\n```'));
 assert.deepStrictEqual(inlayHintsOf(counterexamples, text(['// new', ...failing])).map(h => h.position.line), [3]);
 assert.deepStrictEqual(inlayHintsOf(counterexamples, text(['proc p(x: Int, r: Ref) {', '  var y := x * 2;', '  assert y >= r.f;', '}'])), []);
 const unmentioned = { ...counterexamples, entries: [{ ...counterexamples.entries[0], range: range(3, 0, 1), certain: true }] };
-assert.strictEqual(inlayHintsOf(unmentioned, text(failing))[0].label, 'x = 3, y = 6, r = ref#1, r.f = 7 (permission 1)');
+assert.strictEqual(inlayHintsOf(unmentioned, text(failing))[0].label, 'x = 3, y = 6, r = Ref#1, r.f = 7 (permission 1)');
 console.log('  ok   inlay hints show the values a failure mentions, or all, on unchanged lines');
 
 const procOutline = { version: 1, lines: failing, entries: [entry('p', 'proc', 0, 5, 6, 3, 1)] };
@@ -107,3 +107,11 @@ assert.deepStrictEqual(counterexampleValue(counterexamples, procOutline, text(fa
 assert.strictEqual(counterexampleValue(counterexamples, procOutline, text(failing), { line: 1, character: 7 }, 'z'), undefined);
 assert.strictEqual(counterexampleValue(counterexamples, undefined, text(failing), { line: 1, character: 7 }, 'y'), undefined);
 console.log('  ok   a variable of a failing callable has its value at the failure');
+
+const variable = { name: 'x', kind: 'variable' }, field = { name: 'M.f', kind: 'field' };
+assert.strictEqual(valueName(variable, '  x := 1;', 2), 'x');
+assert.strictEqual(valueName(field, '  y := r.f;', 9), 'r.f');
+assert.strictEqual(valueName(field, '  y := r.next.f;', 14), undefined);
+assert.strictEqual(valueName(field, '  field f: Int', 8), undefined);
+assert.strictEqual(valueName({ name: 'p', kind: 'procedure' }, 'p()', 0), undefined);
+console.log('  ok   a value is named by its variable, or by a field of a variable');

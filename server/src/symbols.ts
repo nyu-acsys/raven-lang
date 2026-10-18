@@ -233,6 +233,19 @@ export function inlayHintsOf(counterexamples: Counterexamples, text: string): In
 	});
 }
 
+/**
+ * The name a counterexample gives the value of [symbol], used at [start] of [line]: a
+ * variable's own, and for a field of a variable, as in `r.f`, the variable's and the
+ * field's.
+ */
+export function valueName(symbol: SymbolInfo, line: string, start: number): string | undefined {
+	if (symbol.kind === 'variable') return symbol.name;
+	if (symbol.kind !== 'field' || line[start - 1] !== '.') return undefined;
+	const receiver = /[A-Za-z_][A-Za-z0-9_']*$/.exec(line.slice(0, start - 1));
+	if (!receiver || (receiver.index > 0 && line[receiver.index - 1] === '.')) return undefined;
+	return `${receiver[0]}.${symbol.name.slice(symbol.name.lastIndexOf('.') + 1)}`;
+}
+
 const CALLABLE_KINDS = new Set(['proc', 'lemma', 'func', 'pred', 'inv']);
 
 /**
