@@ -24,14 +24,18 @@ const fs = require('fs');
 if (process.argv[2] === '--server') {
 	let buffer = '';
 	let previous = Promise.resolve();
+	let current;
 	const answer = line => new Promise(done => {
 		const { id, cwd, args } = JSON.parse(line);
-		const run = require('child_process').spawn(process.execPath, [__filename, ...args], { cwd });
+		const run = require('child_process').spawn(process.execPath, [__filename, ...args], { cwd, detached: true });
+		current = { id, run, cancelled: false };
 		let stdout = '', stderr = '';
 		run.stdout.on('data', data => { stdout += data; });
 		run.stderr.on('data', data => { stderr += data; });
 		run.on('close', code => {
-			process.stdout.write(JSON.stringify({ id, exit: code ?? 1, stdout, stderr }) + '\\n');
+			const answer = current.cancelled ? { id, cancelled: true } : { id, exit: code ?? 1, stdout, stderr };
+			current = undefined;
+			process.stdout.write(JSON.stringify(answer) + '\\n');
 			done();
 		});
 	});
@@ -41,6 +45,15 @@ if (process.argv[2] === '--server') {
 		while ((newline = buffer.indexOf('\\n')) >= 0) {
 			const line = buffer.slice(0, newline);
 			buffer = buffer.slice(newline + 1);
+			const message = JSON.parse(line);
+			// A cancellation stops the run, as Raven's does, also its solver.
+			if ('cancel' in message) {
+				if (current && current.id === message.cancel) {
+					current.cancelled = true;
+					try { process.kill(-current.run.pid, 'SIGKILL'); } catch { current.run.kill('SIGKILL'); }
+				}
+				continue;
+			}
 			previous = previous.then(() => answer(line));
 		}
 	});

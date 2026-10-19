@@ -94,7 +94,8 @@ setInterval(() => {}, 1000);
 
 // A Raven server (`raven --server`) that answers each request with its arguments. Its
 // first argument selects a behavior: `fail` exits with an error, `crash-once` ends the
-// first server it reaches, and `hang` never answers, after starting a solver.
+// first server it reaches, `hang` never answers, after starting a solver, and `wait`
+// answers only its cancellation.
 async function servers() {
 	if (process.platform === 'win32') {
 		console.log('Raven server checks skipped: fixture needs an executable script.');
@@ -109,12 +110,19 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 fs.appendFileSync(${JSON.stringify(starts)}, process.pid + '\\n');
 let buffer = '';
+let waiting;
 process.stdin.on('data', data => {
 	buffer += data;
 	let newline;
 	while ((newline = buffer.indexOf('\\n')) >= 0) {
-		const { id, cwd, args } = JSON.parse(buffer.slice(0, newline));
+		const message = JSON.parse(buffer.slice(0, newline));
 		buffer = buffer.slice(newline + 1);
+		if ('cancel' in message) {
+			if (waiting === message.cancel) { process.stdout.write(JSON.stringify({ id: waiting, cancelled: true }) + '\\n'); waiting = undefined; }
+			continue;
+		}
+		const { id, cwd, args } = message;
+		if (args[0] === 'wait') { waiting = id; continue; }
 		if (args[0] === 'crash-once' && !fs.existsSync(${JSON.stringify(crashed)})) {
 			fs.writeFileSync(${JSON.stringify(crashed)}, '');
 			process.exit(3);
@@ -160,6 +168,16 @@ process.stdin.on('data', data => {
 		assert.deepStrictEqual(await echo(['d']), { cwd: dir, args: ['d'] });
 		assert.strictEqual(started().length, 3);
 		console.log('  ok   cancelling a run stops its server and solver, and the next run starts another');
+
+		const waitController = new AbortController();
+		const waited = pool.serve(executable, ['wait'], dir, process.env, waitController.signal).then(
+			() => { throw new Error('Cancelled run succeeded'); }, error => error);
+		await new Promise(resolve => setTimeout(resolve, 50));
+		waitController.abort();
+		assert.match((await waited).message, /cancelled/);
+		assert.deepStrictEqual(await echo(['f']), { cwd: dir, args: ['f'] });
+		assert.strictEqual(started().length, 3);
+		console.log('  ok   a server that answers a cancellation is kept for the next run');
 
 		const otherEnv = { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}` };
 		const previous = started()[2];
