@@ -50,9 +50,9 @@ interface InheritedAnnotations {
 	contracts: InheritedContract[],
 	modules?: InheritedMembers[],
 	members?: MemberStatus[],
-	/** What the statuses reflect: the type check, which members are still to be checked, or
-	 * the check's result. */
-	phase?: 'typed' | 'scheduled' | 'final'
+	/** What the statuses reflect: the type check, which members are still to be checked, the
+	 * checks done so far, or the check's result. */
+	phase?: 'typed' | 'scheduled' | 'progress' | 'final'
 }
 
 /** The title and tooltip of the code lens for each status. */

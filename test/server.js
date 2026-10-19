@@ -59,6 +59,7 @@ if (process.argv[2] === '--server') {
 			if (partial && !verified.cancelled && Array.isArray(output.members) && output.members.some(m => m.status)) {
 				const members = output.members.map(m => m.status ? { ...m, status: 'pending' } : m);
 				send({ partial: JSON.stringify({ ...output, errors: [], members }), phase: 'scheduled' });
+				send({ partial: JSON.stringify({ members: output.members }), phase: 'progress' });
 			}
 		} catch { /* no output */ }
 		send(verified.cancelled ? { cancelled: true } : { exit: verified.exit, stdout: verified.stdout, stderr: verified.stderr });
@@ -516,10 +517,12 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 		const annotationStart = annotations.length;
 		assert.deepStrictEqual(await diagnostics(membersUri), []);
 		const reported = annotations.slice(annotationStart).filter(a => a.uri === membersUri);
-		assert.deepStrictEqual(reported.map(a => a.members.length), [0, 1, 1]);
-		assert.deepStrictEqual(reported.map(a => a.phase), ['typed', 'scheduled', 'final']);
+		assert.deepStrictEqual(reported.map(a => a.members.length), [0, 1, 1, 1]);
+		assert.deepStrictEqual(reported.map(a => a.phase), ['typed', 'scheduled', 'progress', 'final']);
 		assert.strictEqual(reported[1].members[0].status, 'pending');
-		assert.deepStrictEqual(reported[2].members[0], {
+		assert.strictEqual(reported[2].members[0].status, 'verified');
+		assert.deepStrictEqual(reported[2].modules, reported[1].modules);
+		assert.deepStrictEqual(reported[3].members[0], {
 			range: { start: { line: 1, character: 1 }, end: { line: 1, character: 5 } },
 			name: 'M.p', kind: 'proc', status: 'verified'
 		});

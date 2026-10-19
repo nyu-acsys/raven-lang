@@ -507,8 +507,11 @@ async function validateTextDocument(
 	const strict = strictOverride ?? settings.strict;
 	// [phase]: what the members' statuses reflect, the type check, which members are still
 	// to be checked (protocol 4), or the check's result.
-	let phase: 'typed' | 'scheduled' | 'final' = 'final';
+	let phase: 'typed' | 'scheduled' | 'progress' | 'final' = 'final';
+	// The last ones reported, which a report of the members' progress keeps.
+	let reported: { contracts: InheritedContract[], modules: InheritedMembers[] } = { contracts: [], modules: [] };
 	const reportAnnotations = (contracts: InheritedContract[], modules: InheritedMembers[], members: MemberStatus[] = []) => {
+		reported = { contracts, modules };
 		if (isCurrent()) connection.sendNotification('raven/inheritedContracts', {
 			uri: textDocument.uri, version: textDocument.version, runId, contracts, modules, members, phase
 		});
@@ -568,6 +571,44 @@ async function validateTextDocument(
 		...cacheArgs,
 		"--base-dir", dir, tmpfile.name
 	];
+	// Raven reports every location in whatever file it is really in: the temporary
+	// copy of this document, a file reached through `include`, or one of its own
+	// embedded library sources. Only the temp copy needs rewriting -- everything else
+	// is a real location already, and passing it through is what makes a related
+	// location clickable rather than silently redirected at the file being edited.
+	//
+	// A library source is flagged `library` and named by its path within the Raven
+	// repository. It carries `path` as well when the verifier is running inside a
+	// checkout whose copy of that file matches the embedded one byte for byte -- the
+	// real source, worth opening and editing. Otherwise there is no file to open and
+	// we fall back to the read-only virtual document (see LIBRARY_SCHEME in the
+	// client), which serves the text from the verifier itself.
+	const tmpfileResolved = path.resolve(tmpfile.name);
+	const uriForError = function (e: { file: string, library?: boolean, path?: string }): string {
+		if (e.library) {
+			return e.path
+				? URI.file(e.path).toString()
+				: URI.from({ scheme: LIBRARY_SCHEME, path: `/${e.file}` }).toString();
+		}
+		const resolved = path.resolve(dir, e.file);
+		return resolved === tmpfileResolved ? textDocument.uri : URI.file(resolved).toString();
+	};
+
+	const rangeOf = function (e: { start_line: number, start_col: number, end_line: number, end_col: number }) {
+		return {
+			start: { line: Math.max(0, e.start_line - 1), character: Math.max(0, e.start_col) },
+			end: { line: Math.max(0, e.end_line - 1), character: Math.max(0, e.end_col) }
+		};
+	};
+
+	// The statuses of the members Raven reports that are in this document.
+	const memberStatusesOf = (reported: RavenMemberStatus[]): MemberStatus[] => reported
+		.filter(m => uriForError(m) === textDocument.uri)
+		.map(m => ({
+			range: rangeOf(m), name: m.name, kind: m.kind, status: m.status, counts: m.counts,
+			inherited: m.inherited, checked: m.checked, cached: m.cached
+		}));
+
 	// Reports what Raven output, as [obtain] gives it, to the client, and returns its
 	// diagnostics and whether it found errors.
 	const interpret = async (obtain: () => Promise<string>): Promise<CheckResult> => {
@@ -611,36 +652,6 @@ async function validateTextDocument(
 				memberNames = output.members.map((m: { name: string }) => m.name);
 			}
 			failed = errors.some(e => !["RelatedLoc", "Warning", "Limit", "Counterexample", "Branch"].includes(e.kind));
-
-			// Raven reports every location in whatever file it is really in: the temporary
-			// copy of this document, a file reached through `include`, or one of its own
-			// embedded library sources. Only the temp copy needs rewriting -- everything else
-			// is a real location already, and passing it through is what makes a related
-			// location clickable rather than silently redirected at the file being edited.
-			//
-			// A library source is flagged `library` and named by its path within the Raven
-			// repository. It carries `path` as well when the verifier is running inside a
-			// checkout whose copy of that file matches the embedded one byte for byte -- the
-			// real source, worth opening and editing. Otherwise there is no file to open and
-			// we fall back to the read-only virtual document (see LIBRARY_SCHEME in the
-			// client), which serves the text from the verifier itself.
-			const tmpfileResolved = path.resolve(tmpfile.name);
-			const uriForError = function (e: { file: string, library?: boolean, path?: string }): string {
-				if (e.library) {
-					return e.path
-						? URI.file(e.path).toString()
-						: URI.from({ scheme: LIBRARY_SCHEME, path: `/${e.file}` }).toString();
-				}
-				const resolved = path.resolve(dir, e.file);
-				return resolved === tmpfileResolved ? textDocument.uri : URI.file(resolved).toString();
-			};
-
-			const rangeOf = function (e: { start_line: number, start_col: number, end_line: number, end_col: number }) {
-				return {
-					start: { line: Math.max(0, e.start_line - 1), character: Math.max(0, e.start_col) },
-					end: { line: Math.max(0, e.end_line - 1), character: Math.max(0, e.end_col) }
-				};
-			};
 
 			// A related location may be reported either before or after the diagnostic it
 			// explains -- Raven prints the declaration a rule was inherited from ahead of the
@@ -807,13 +818,7 @@ async function validateTextDocument(
 				name: m.name, kind: m.kind, status: m.status, selection: rangeOf(m), range: rangeOf(m.extent!)
 			}))
 		});
-		const members: MemberStatus[] = memberStatuses
-			.filter(m => uriForError(m) === textDocument.uri)
-			.map(m => ({
-				range: rangeOf(m), name: m.name, kind: m.kind, status: m.status, counts: m.counts,
-				inherited: m.inherited, checked: m.checked, cached: m.cached
-			}));
-		reportAnnotations(contracts, modules, members);
+		reportAnnotations(contracts, modules, memberStatusesOf(memberStatuses));
 		} catch (error) {
 			if (signal.aborted) throw error;
 			unavailable = error instanceof Error ? error.message : String(error);
@@ -852,6 +857,16 @@ async function validateTextDocument(
 				const verified = verificationProcesses.serve(executable, argsWith([
 					"--counterexamples", ...(focus ? ["--only", focus] : [])
 				]), dir, env, signal, (text, answerPhase) => {
+					if (answerPhase === 'progress') {
+						// The members' statuses as their checks are done.
+						scheduled = scheduled.then(() => {
+							const members = (JSON.parse(text) as { members?: RavenMemberStatus[] }).members;
+							if (!Array.isArray(members)) return;
+							phase = 'progress';
+							reportAnnotations(reported.contracts, reported.modules, memberStatusesOf(members));
+						}).catch(() => { /* reported by the check */ });
+						return;
+					}
 					if (answerPhase !== 'scheduled') { typedOutput(text); return; }
 					// Which members are cached and which still to be checked, after the type check.
 					scheduled = typedInterpreted.then(async () => {
