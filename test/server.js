@@ -53,13 +53,18 @@ if (process.argv[2] === '--server') {
 			if (typed.exit === 0 && !errors) send({ partial: typed.stdout.trim(), phase: 'typed' });
 		}
 		const verified = await run(id, cwd, args);
-		// Which members are still to be checked: those with a status, as pending.
+		// Which members are still to be checked, those with a status, as pending, and then
+		// the members' statuses and errors as the checks are done.
 		try {
 			const output = JSON.parse(verified.stdout);
-			if (partial && !verified.cancelled && Array.isArray(output.members) && output.members.some(m => m.status)) {
-				const members = output.members.map(m => m.status ? { ...m, status: 'pending' } : m);
-				send({ partial: JSON.stringify({ ...output, errors: [], members }), phase: 'scheduled' });
-				send({ partial: JSON.stringify({ members: output.members }), phase: 'progress' });
+			if (partial && !verified.cancelled && !Array.isArray(output)) {
+				const members = output.members ?? [];
+				if (members.some(m => m.status)) {
+					send({ partial: JSON.stringify({ ...output, errors: [], members: members.map(m => m.status ? { ...m, status: 'pending' } : m) }), phase: 'scheduled' });
+				}
+				if (members.some(m => m.status) || output.errors.length > 0) {
+					send({ partial: JSON.stringify({ members, errors: output.errors }), phase: 'progress' });
+				}
 			}
 		} catch { /* no output */ }
 		send(verified.cancelled ? { cancelled: true } : { exit: verified.exit, stdout: verified.stdout, stderr: verified.stderr });
@@ -161,6 +166,7 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 	const stateUpdates = [];
 	const annotations = [];
 	const dependencyUpdates = [];
+	const progressDiagnostics = [];
 	const invalidations = [];
 	const stateWaiters = [];
 	const settings = new Map();
@@ -211,6 +217,8 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 				}
 			} else if (message.method === 'raven/dependencies') {
 				dependencyUpdates.push(message.params);
+			} else if (message.method === 'raven/progressDiagnostics') {
+				progressDiagnostics.push(message.params);
 			} else if (message.method === 'raven/verificationInvalidated') {
 				invalidations.push(message.params);
 			} else if (message.method === 'raven/inheritedContracts') {
@@ -504,6 +512,9 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 		assert(inlayHintRefreshes > refreshesBefore, 'Inlay hints are refreshed after a check');
 		assert.deepStrictEqual(cexDiagnostics.map(d => d.message), ['[Verification Error] Assertion failed']);
 		assert(calls().at(-1).includes('--counterexamples') && !calls().at(-1).includes('--typeonly'));
+		// The failure is reported while the check runs, too.
+		assert.deepStrictEqual(progressDiagnostics.filter(p => p.uri === cexUri).at(-1).diagnostics.map(d => d.message),
+			['[Verification Error] Assertion failed']);
 		const hints = await request('textDocument/inlayHint', { textDocument: { uri: cexUri }, range: { start: { line: 0, character: 0 }, end: { line: 2, character: 0 } } });
 		assert.deepStrictEqual(hints.map(h => [h.position, h.label]),
 			[[{ line: 1, character: 5 }, 'CEX = 1'], [{ line: 0, character: 4 }, '→ then (failure on line 2)']]);

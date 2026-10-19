@@ -601,6 +601,112 @@ async function validateTextDocument(
 		};
 	};
 
+	// The diagnostics of Raven's [errors], and the counterexamples among them.
+	const diagnosticsOf = (errors: RavenError[]) => {
+		const diagnostics: Diagnostic[] = [];
+		// A related location may be reported either before or after the diagnostic it
+		// explains -- Raven prints the declaration a rule was inherited from ahead of the
+		// failure, and the unproven assertion after it. Leading ones used to be dropped
+		// outright (`diagnostics.pop()` on an empty array), so buffer them and attach
+		// them to the next error instead.
+		let pendingRelated: DiagnosticRelatedInformation[] = [];
+		const counterexamples: CounterexampleEntry[] = [];
+		let previousError: Diagnostic | undefined;
+
+		// Underlines for related locations that fall inside this document, collected
+		// separately so they are appended after the errors they explain.
+		const highlightRelated = settings.highlightRelatedLocations !== false;
+		const relatedHighlights: Diagnostic[] = [];
+
+		// Convert errors into diagnostic reports
+		for (const err of errors) {
+			const kind_string = match(err)
+				.returnType<string>()
+				.with({ kind: 'Lexical' }, () => 'Lexical Error')
+				.with({ kind: 'Syntax' }, () => 'Syntax Error')
+				.with({ kind: 'Type' }, () => 'Type Error')
+				.with({ kind: 'Verification' }, () => 'Verification Error')
+				.with({ kind: 'Internal' }, () => 'Internal Error')
+				.with({ kind: 'Unsupported' }, () => 'Unsupported Error')
+				.with({ kind: 'RelatedLoc' }, () => 'Related Location')
+				.with({ kind: 'Warning' }, () => 'Warning')
+				.otherwise(() => "Error");
+
+			const msg = err.message.join("\n");
+
+			if (err.kind === "Branch") {
+				// Protocol 4: the arm of a conditional the counterexample before it takes.
+				const last = counterexamples.at(-1);
+				if (last && uriForError(err) === textDocument.uri) {
+					last.branches = [...(last.branches ?? []), { range: rangeOf(err), label: msg }];
+				}
+			} else if (err.kind === "Counterexample") {
+				// Protocol 4: the values for which the error before it occurs.
+				if (previousError) counterexamples.push({
+					range: previousError.range,
+					certain: (err as { certain?: boolean }).certain === true,
+					values: counterexampleValues(err.message)
+				});
+			} else if (err.kind === "Limit") {
+				// Protocol 4: Raven stopped after the maximal number of errors.
+				diagnostics.push({
+					severity: DiagnosticSeverity.Information,
+					range: rangeOf(err),
+					message: `Raven stopped after ${maxErrors} errors; increase ravenServer.maxNumberOfProblems to see more.`,
+					source: 'raven'
+				});
+			} else if (err.kind == "RelatedLoc") {
+				if (hasDiagnosticRelatedInformationCapability) {
+					const uri = uriForError(err);
+					const related: DiagnosticRelatedInformation = {
+						location: { uri, range: rangeOf(err) },
+						message: `${msg}`
+					};
+					if (previousError) {
+						previousError.relatedInformation = [...(previousError.relatedInformation ?? []), related];
+					} else {
+						pendingRelated.push(related);
+					}
+					// Related information alone is only visible on hover or in the Problems
+					// panel. Emitting the location as a diagnostic in its own right also
+					// underlines it in the editor -- Information severity, so it is blue
+					// rather than the red of the failure it explains. Only for locations in
+					// this document: a diagnostic is displayed in the document it is
+					// reported against, so one belonging to another file has to stay
+					// related information.
+					if (highlightRelated && uri === textDocument.uri) {
+						relatedHighlights.push({
+							severity: DiagnosticSeverity.Information,
+							range: rangeOf(err),
+							message: `[Related Location] ${msg}`,
+							source: 'raven'
+						});
+					}
+				}
+			} else {
+				const diagnostic: Diagnostic = {
+					severity: err.kind === "Warning" ? DiagnosticSeverity.Warning : DiagnosticSeverity.Error,
+					...(err.kind === "Warning" ? { code: "strict" } : {}),
+					range: rangeOf(err),
+					message: `[${kind_string}] ${msg}`,
+					source: 'raven'
+				};
+				// Warnings do not change the error that related locations explain.
+				if (err.kind !== "Warning") {
+					previousError = diagnostic;
+					if (pendingRelated.length > 0) {
+						diagnostic.relatedInformation = pendingRelated;
+						pendingRelated = [];
+					}
+				}
+				diagnostics.push(diagnostic);
+			}
+		}
+
+		diagnostics.push(...relatedHighlights);
+		return { diagnostics, counterexamples };
+	};
+
 	// The statuses of the members Raven reports that are in this document.
 	const memberStatusesOf = (reported: RavenMemberStatus[]): MemberStatus[] => reported
 		.filter(m => uriForError(m) === textDocument.uri)
@@ -653,106 +759,8 @@ async function validateTextDocument(
 			}
 			failed = errors.some(e => !["RelatedLoc", "Warning", "Limit", "Counterexample", "Branch"].includes(e.kind));
 
-			// A related location may be reported either before or after the diagnostic it
-			// explains -- Raven prints the declaration a rule was inherited from ahead of the
-			// failure, and the unproven assertion after it. Leading ones used to be dropped
-			// outright (`diagnostics.pop()` on an empty array), so buffer them and attach
-			// them to the next error instead.
-			let pendingRelated: DiagnosticRelatedInformation[] = [];
-			const counterexamples: CounterexampleEntry[] = [];
-			let previousError: Diagnostic | undefined;
-
-			// Underlines for related locations that fall inside this document, collected
-			// separately so they are appended after the errors they explain.
-			const highlightRelated = settings.highlightRelatedLocations !== false;
-			const relatedHighlights: Diagnostic[] = [];
-
-			// Convert errors into diagnostic reports
-			for (const err of errors) {
-				const kind_string = match(err)
-					.returnType<string>()
-					.with({ kind: 'Lexical' }, () => 'Lexical Error')
-					.with({ kind: 'Syntax' }, () => 'Syntax Error')
-					.with({ kind: 'Type' }, () => 'Type Error')
-					.with({ kind: 'Verification' }, () => 'Verification Error')
-					.with({ kind: 'Internal' }, () => 'Internal Error')
-					.with({ kind: 'Unsupported' }, () => 'Unsupported Error')
-					.with({ kind: 'RelatedLoc' }, () => 'Related Location')
-					.with({ kind: 'Warning' }, () => 'Warning')
-					.otherwise(() => "Error");
-
-				const msg = err.message.join("\n");
-
-				if (err.kind === "Branch") {
-					// Protocol 4: the arm of a conditional the counterexample before it takes.
-					const last = counterexamples.at(-1);
-					if (last && uriForError(err) === textDocument.uri) {
-						last.branches = [...(last.branches ?? []), { range: rangeOf(err), label: msg }];
-					}
-				} else if (err.kind === "Counterexample") {
-					// Protocol 4: the values for which the error before it occurs.
-					if (previousError) counterexamples.push({
-						range: previousError.range,
-						certain: (err as { certain?: boolean }).certain === true,
-						values: counterexampleValues(err.message)
-					});
-				} else if (err.kind === "Limit") {
-					// Protocol 4: Raven stopped after the maximal number of errors.
-					diagnostics.push({
-						severity: DiagnosticSeverity.Information,
-						range: rangeOf(err),
-						message: `Raven stopped after ${maxErrors} errors; increase ravenServer.maxNumberOfProblems to see more.`,
-						source: 'raven'
-					});
-				} else if (err.kind == "RelatedLoc") {
-					if (hasDiagnosticRelatedInformationCapability) {
-						const uri = uriForError(err);
-						const related: DiagnosticRelatedInformation = {
-							location: { uri, range: rangeOf(err) },
-							message: `${msg}`
-						};
-						if (previousError) {
-							previousError.relatedInformation = [...(previousError.relatedInformation ?? []), related];
-						} else {
-							pendingRelated.push(related);
-						}
-						// Related information alone is only visible on hover or in the Problems
-						// panel. Emitting the location as a diagnostic in its own right also
-						// underlines it in the editor -- Information severity, so it is blue
-						// rather than the red of the failure it explains. Only for locations in
-						// this document: a diagnostic is displayed in the document it is
-						// reported against, so one belonging to another file has to stay
-						// related information.
-						if (highlightRelated && uri === textDocument.uri) {
-							relatedHighlights.push({
-								severity: DiagnosticSeverity.Information,
-								range: rangeOf(err),
-								message: `[Related Location] ${msg}`,
-								source: 'raven'
-							});
-						}
-					}
-				} else {
-					const diagnostic: Diagnostic = {
-						severity: err.kind === "Warning" ? DiagnosticSeverity.Warning : DiagnosticSeverity.Error,
-						...(err.kind === "Warning" ? { code: "strict" } : {}),
-						range: rangeOf(err),
-						message: `[${kind_string}] ${msg}`,
-						source: 'raven'
-					};
-					// Warnings do not change the error that related locations explain.
-					if (err.kind !== "Warning") {
-						previousError = diagnostic;
-						if (pendingRelated.length > 0) {
-							diagnostic.relatedInformation = pendingRelated;
-							pendingRelated = [];
-						}
-					}
-					diagnostics.push(diagnostic);
-				}
-			}
-
-			diagnostics.push(...relatedHighlights);
+			const { diagnostics: converted, counterexamples } = diagnosticsOf(errors);
+			diagnostics.push(...converted);
 
 			// The contracts that members of this document inherit, for the client to show
 			// under their headers. A clause is marked as failing when an error names it as a
@@ -860,10 +868,18 @@ async function validateTextDocument(
 					if (answerPhase === 'progress') {
 						// The members' statuses as their checks are done.
 						scheduled = scheduled.then(() => {
-							const members = (JSON.parse(text) as { members?: RavenMemberStatus[] }).members;
-							if (!Array.isArray(members)) return;
-							phase = 'progress';
-							reportAnnotations(reported.contracts, reported.modules, memberStatusesOf(members));
+							const progress = JSON.parse(text) as { members?: RavenMemberStatus[], errors?: RavenError[] };
+							if (Array.isArray(progress.members)) {
+								phase = 'progress';
+								reportAnnotations(reported.contracts, reported.modules, memberStatusesOf(progress.members));
+							}
+							// The errors found so far, which the client shows until the check is done.
+							if (Array.isArray(progress.errors) && isCurrent()) {
+								connection.sendNotification('raven/progressDiagnostics', {
+									uri: textDocument.uri, version: textDocument.version, runId,
+									diagnostics: diagnosticsOf(progress.errors).diagnostics
+								});
+							}
 						}).catch(() => { /* reported by the check */ });
 						return;
 					}

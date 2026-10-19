@@ -34,6 +34,7 @@ import {
 import { Release, fetchRelease, incompatibilityReason, installRelease, isNewer } from './ravenUpdate';
 import { LineMessages, gutterMarkers } from './gutter';
 import { registerInheritedContracts } from './inheritedContracts';
+import { registerProgressDiagnostics } from './progressDiagnostics';
 import { DependencyWatchers, DependencyUpdate } from './dependencyWatchers';
 
 let client: LanguageClient;
@@ -478,6 +479,7 @@ export function activate(context: ExtensionContext) {
 	);
 
 	const inheritedContracts = registerInheritedContracts(context, client);
+	const progressDiagnostics = registerProgressDiagnostics(context, client);
 	const changedFile = (uri: vscode.Uri, type: number) => {
 		if (client.isRunning()) client.sendNotification('workspace/didChangeWatchedFiles', {
 			changes: [{ uri: uri.toString(), type }]
@@ -509,6 +511,7 @@ export function activate(context: ExtensionContext) {
 	context.subscriptions.push(verificationStatusBarItem);
 	context.subscriptions.push(client.onNotification('raven/verificationState', (update: VerificationUpdate) => {
 		inheritedContracts.onVerificationState(update);
+		progressDiagnostics.onVerificationState(update);
 		const document = vscode.workspace.textDocuments.find(d => d.uri.toString() === update.uri);
 		if (document && verificationStates.update(update, document.version)) {
 			updateStatusBar(getActiveRavenEditor());
