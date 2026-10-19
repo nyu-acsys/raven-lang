@@ -171,6 +171,24 @@ try {
 		.map(lens => lens.command.arguments[1]), ['L', 'L.valid', 'L.len']);
 	console.log('  ok   members and modules get a Verify this lens if there is something to verify, and the focus a Verify all one');
 
+	const phasesDocument = open('phases');
+	const report = (runId, phase, statuses) => emit('raven/inheritedContracts', {
+		uri: phasesDocument.uri.toString(), version: phasesDocument.version, runId, contracts: [], phase,
+		members: ['p', 'q'].map((name, line) => ({ range: range(line), name: `M.${name}`, kind: 'proc', ...statuses[line] }))
+	});
+	const statusTitles = () => lenses(phasesDocument).map(lens => lens.command.title).filter(title => !title.startsWith('Verify'));
+	start(phasesDocument, 1);
+	report(1, 'final', [{ status: 'verified' }, { status: 'failed' }]);
+	start(phasesDocument, 2);
+	report(2, 'typed', [{}, {}]);
+	assert.deepStrictEqual(statusTitles(), ['✓ verified', '✗ failed']);
+	report(2, 'scheduled', [{ status: 'verified', cached: true }, { status: 'pending' }]);
+	assert.deepStrictEqual(statusTitles(), ['✓ verified', '⋯ checking']);
+	assert(lenses(phasesDocument).find(lens => lens.command.title === '✓ verified').command.tooltip.includes('before'));
+	report(2, 'final', [{ status: 'verified', cached: true }, { status: 'verified' }]);
+	assert.deepStrictEqual(statusTitles(), ['✓ verified', '✓ verified']);
+	console.log('  ok   members keep their last status until a check says which it checks again, shown as checking');
+
 	let refreshes = 0;
 	context.subscriptions.push(providers.lenses.onDidChangeCodeLenses(() => refreshes++));
 	let document = open('main');

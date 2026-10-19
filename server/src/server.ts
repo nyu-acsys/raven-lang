@@ -505,9 +505,12 @@ async function validateTextDocument(
 ): Promise<VerificationResult> {
 	const settings = await getDocumentSettings(textDocument.uri);
 	const strict = strictOverride ?? settings.strict;
+	// [phase]: what the members' statuses reflect, the type check, which members are still
+	// to be checked (protocol 4), or the check's result.
+	let phase: 'typed' | 'scheduled' | 'final' = 'final';
 	const reportAnnotations = (contracts: InheritedContract[], modules: InheritedMembers[], members: MemberStatus[] = []) => {
 		if (isCurrent()) connection.sendNotification('raven/inheritedContracts', {
-			uri: textDocument.uri, version: textDocument.version, runId, contracts, modules, members
+			uri: textDocument.uri, version: textDocument.version, runId, contracts, modules, members, phase
 		});
 	};
 	const resultFor = (result: CheckResult): VerificationResult => ({
@@ -843,12 +846,24 @@ async function validateTextDocument(
 				const focus = focusedNames.get(textDocument.uri);
 				let typedOutput: (text: string) => void = () => {};
 				const partial = new Promise<string>(resolve => { typedOutput = resolve; });
+				let typedDone: () => void = () => {};
+				const typedInterpreted = new Promise<void>(resolve => { typedDone = resolve; });
+				let scheduled = Promise.resolve();
 				const verified = verificationProcesses.serve(executable, argsWith([
 					"--counterexamples", ...(focus ? ["--only", focus] : [])
-				]), dir, env, signal, typedOutput);
+				]), dir, env, signal, (text, answerPhase) => {
+					if (answerPhase !== 'scheduled') { typedOutput(text); return; }
+					// Which members are cached and which still to be checked, after the type check.
+					scheduled = typedInterpreted.then(async () => {
+						phase = 'scheduled';
+						await interpret(() => Promise.resolve(text));
+					}).catch(() => { /* the check was cancelled */ });
+				});
 				// Without a partial answer, the program does not type-check, and the final
 				// answer says so.
+				phase = 'typed';
 				const typed = await interpret(() => Promise.race([partial, verified]));
+				typedDone();
 				// A focus whose name is gone is dropped, and the whole file verified.
 				if (typed.failed && focus && typed.memberNames && !typed.memberNames.includes(focus)) {
 					focusedNames.delete(textDocument.uri);
@@ -860,7 +875,10 @@ async function validateTextDocument(
 					return resultFor(typed);
 				}
 				if (!isCurrent()) throw new ResponseError(LSPErrorCodes.ServerCancelled, 'Verification superseded', { retriggerRequest: true });
-				return resultFor(await interpret(() => verified));
+				const output = await verified;
+				await scheduled;
+				phase = 'final';
+				return resultFor(await interpret(() => Promise.resolve(output)));
 			}
 		}
 		// Type checking alone gives the inherited contracts, much sooner than verification.

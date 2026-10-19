@@ -50,9 +50,17 @@ if (process.argv[2] === '--server') {
 			if (typed.cancelled) { send({ cancelled: true }); return; }
 			let errors = true;
 			try { const output = JSON.parse(typed.stdout); errors = (Array.isArray(output) ? output : output.errors).length > 0; } catch { /* no output */ }
-			if (typed.exit === 0 && !errors) send({ partial: typed.stdout.trim() });
+			if (typed.exit === 0 && !errors) send({ partial: typed.stdout.trim(), phase: 'typed' });
 		}
 		const verified = await run(id, cwd, args);
+		// Which members are still to be checked: those with a status, as pending.
+		try {
+			const output = JSON.parse(verified.stdout);
+			if (partial && !verified.cancelled && Array.isArray(output.members) && output.members.some(m => m.status)) {
+				const members = output.members.map(m => m.status ? { ...m, status: 'pending' } : m);
+				send({ partial: JSON.stringify({ ...output, errors: [], members }), phase: 'scheduled' });
+			}
+		} catch { /* no output */ }
 		send(verified.cancelled ? { cancelled: true } : { exit: verified.exit, stdout: verified.stdout, stderr: verified.stderr });
 	})();
 	process.stdin.on('data', data => {
@@ -502,18 +510,22 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 		send({ method: 'raven/executable', params: { executable, lspProtocol: 3 } });
 		console.log('  ok   counterexamples come with failures from protocol 4 on, as refreshed inlay hints and not as diagnostics');
 
+		send({ method: 'raven/executable', params: { executable, lspProtocol: 4 } });
 		const membersUri = pathToFileURL(path.join(dir, 'members.rav')).toString();
 		send({ method: 'textDocument/didOpen', params: { textDocument: { uri: membersUri, languageId: 'raven', version: 1, text: 'MEMBERS' } } });
 		const annotationStart = annotations.length;
 		assert.deepStrictEqual(await diagnostics(membersUri), []);
 		const reported = annotations.slice(annotationStart).filter(a => a.uri === membersUri);
-		assert.deepStrictEqual(reported.map(a => a.members.length), [0, 1]);
-		assert.deepStrictEqual(reported[1].members[0], {
+		assert.deepStrictEqual(reported.map(a => a.members.length), [0, 1, 1]);
+		assert.deepStrictEqual(reported.map(a => a.phase), ['typed', 'scheduled', 'final']);
+		assert.strictEqual(reported[1].members[0].status, 'pending');
+		assert.deepStrictEqual(reported[2].members[0], {
 			range: { start: { line: 1, character: 1 }, end: { line: 1, character: 5 } },
 			name: 'M.p', kind: 'proc', status: 'verified'
 		});
 		send({ method: 'textDocument/didClose', params: { textDocument: { uri: membersUri } } });
-		console.log('  ok   the status of the members of the checked document reaches the client');
+		send({ method: 'raven/executable', params: { executable, lspProtocol: 3 } });
+		console.log('  ok   the status of the members of the checked document reaches the client, also while they are checked');
 
 		const resource = pathToFileURL(path.join(dir, 'overlap.rav')).toString();
 		for (const changeVersion of [true, false]) {

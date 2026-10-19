@@ -49,7 +49,10 @@ interface InheritedAnnotations {
 	runId: number,
 	contracts: InheritedContract[],
 	modules?: InheritedMembers[],
-	members?: MemberStatus[]
+	members?: MemberStatus[],
+	/** What the statuses reflect: the type check, which members are still to be checked, or
+	 * the check's result. */
+	phase?: 'typed' | 'scheduled' | 'final'
 }
 
 /** The title and tooltip of the code lens for each status. */
@@ -57,7 +60,8 @@ const STATUS_LENSES: Record<string, { title: string, tooltip: string }> = {
 	verified: { title: '✓ verified', tooltip: 'Raven verified this {kind}.' },
 	failed: { title: '✗ failed', tooltip: 'Raven could not verify this {kind}; see its errors.' },
 	timeout: { title: '⏱ timed out', tooltip: 'The solver timed out on this {kind}; ravenServer.smtTimeout sets its time limit.' },
-	skipped: { title: '– skipped', tooltip: 'Raven stopped before checking this {kind}, after reaching the error limit.' }
+	skipped: { title: '– skipped', tooltip: 'Raven stopped before checking this {kind}, after reaching the error limit.' },
+	pending: { title: '⋯ checking', tooltip: 'Raven is checking this {kind}.' }
 };
 
 /**
@@ -98,7 +102,8 @@ function verifyLens(uri: string, member: MemberStatus, focus: string | undefined
 
 /** The words for each status in a module's summary, worst first. */
 const SUMMARY_WORDS: [string, string][] = [
-	['failed', 'failed'], ['timeout', 'timed out'], ['skipped', 'skipped'], ['verified', 'verified']
+	['failed', 'failed'], ['timeout', 'timed out'], ['skipped', 'skipped'], ['pending', 'checking'],
+	['verified', 'verified']
 ];
 
 /**
@@ -191,12 +196,15 @@ export function registerInheritedContracts(context: vscode.ExtensionContext, cli
 		const entry = annotations.get(document.uri.toString());
 		return entry?.version === document.version ? entry : undefined;
 	};
+	/** The statuses of the members in the last report that had any, by name. */
+	const lastStatuses = new Map<string, Map<string, { status?: string, cached?: boolean }>>();
 	const invalidate = (uri: string) => {
 		const run = runs.get(uri);
 		if (run) run.accepting = false;
 		if (annotations.delete(uri)) lensesChanged.fire();
 	};
 	const clear = () => {
+		lastStatuses.clear();
 		runs.clear();
 		focuses.clear();
 		const hadAnnotations = annotations.size > 0;
@@ -224,6 +232,7 @@ export function registerInheritedContracts(context: vscode.ExtensionContext, cli
 		}),
 		vscode.workspace.onDidCloseTextDocument(document => {
 			invalidate(document.uri.toString());
+			lastStatuses.delete(document.uri.toString());
 			runs.delete(document.uri.toString());
 			focuses.delete(document.uri.toString());
 		}),
@@ -235,7 +244,16 @@ export function registerInheritedContracts(context: vscode.ExtensionContext, cli
 			const run = runs.get(params.uri);
 			if (!document || !run?.accepting || document.version !== params.version
 				|| run.version !== params.version || run.runId !== params.runId) return;
-			annotations.set(params.uri, params);
+			// Until the check says which members it checks again, they keep their last status.
+			const previous = lastStatuses.get(params.uri);
+			const members = params.phase === 'typed' && previous
+				? params.members?.map(m => m.status === undefined && previous.has(m.name) ? { ...m, ...previous.get(m.name) } : m)
+				: params.members;
+			if (params.phase !== 'typed' && params.members?.some(m => m.status !== undefined)) {
+				lastStatuses.set(params.uri, new Map(params.members.filter(m => m.status !== undefined)
+					.map(m => [m.name, { status: m.status, cached: m.cached }])));
+			}
+			annotations.set(params.uri, { ...params, members });
 			lensesChanged.fire();
 		}));
 

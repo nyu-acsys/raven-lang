@@ -33,7 +33,7 @@ function terminateGroup(child: ChildProcess): Promise<Error | undefined> {
 
 interface ServerAnswer {
 	id: number, exit?: number, stdout?: string, stderr?: string, error?: string, cancelled?: boolean,
-	partial?: string
+	partial?: string, phase?: string
 }
 
 /**
@@ -45,7 +45,7 @@ class RavenServer {
 	private buffer = '';
 	private pending: {
 		id: number, resolve: (answer: ServerAnswer) => void, reject: (error: Error) => void,
-		onPartial?: (text: string) => void
+		onPartial?: (text: string, phase?: string) => void
 	} | undefined;
 	private exited = false;
 	private nextId = 0;
@@ -90,7 +90,7 @@ class RavenServer {
 				void this.stop();
 				continue;
 			}
-			if (answer.partial !== undefined) { pending.onPartial?.(answer.partial); continue; }
+			if (answer.partial !== undefined) { pending.onPartial?.(answer.partial, answer.phase); continue; }
 			this.pending = undefined;
 			pending.resolve(answer);
 		}
@@ -100,7 +100,7 @@ class RavenServer {
 	 * The answer to a run with [args] in the directory [cwd], after the partial answer, if
 	 * [onPartial] asks for one.
 	 */
-	request(cwd: string, args: string[], onPartial?: (text: string) => void): Promise<ServerAnswer> {
+	request(cwd: string, args: string[], onPartial?: (text: string, phase?: string) => void): Promise<ServerAnswer> {
 		return new Promise((resolve, reject) => {
 			if (this.exited || this.pending) { reject(new Error('The Raven server is not available')); return; }
 			const id = this.nextId++;
@@ -171,10 +171,11 @@ export class VerificationProcesses {
 	 * The output of a run of a Raven server (protocol 4) with [args] in [cwd]. A server that
 	 * fails is replaced, and the run is tried once more on the new one. A cancelled run is
 	 * cancelled in its server, which is stopped only if it does not answer in time.
-	 * [onPartial] gets what type checking found, if the program type-checks.
+	 * [onPartial] gets the partial answers with their phases: what type checking found, if
+	 * the program type-checks, and which members are still to be checked.
 	 */
 	async serve(executable: string, args: string[], cwd: string, env: NodeJS.ProcessEnv | undefined, signal: AbortSignal,
-		onPartial?: (text: string) => void): Promise<string> {
+		onPartial?: (text: string, phase?: string) => void): Promise<string> {
 		const key = JSON.stringify([executable, env?.PATH ?? '']);
 		// Servers of another executable, or with another solver, are no longer needed.
 		for (const server of this.idle.filter(s => s.key !== key)) void server.stop();
