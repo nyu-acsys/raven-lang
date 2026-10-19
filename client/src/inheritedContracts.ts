@@ -128,7 +128,7 @@ function statusLens(member: MemberStatus, members: MemberStatus[]): vscode.CodeL
 		});
 	}
 	const tooltip = member.cached
-		? `Raven verified this ${member.kind} before, and nothing it depends on has changed since.`
+		? `Raven verified this ${member.kind} (cached).`
 		: lens.tooltip.replace('{kind}', member.kind);
 	return new vscode.CodeLens(toRange(member.range), {
 		title: lens.title,

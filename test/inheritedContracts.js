@@ -127,7 +127,7 @@ try {
 	assert(lenses(statusDocument).find(lens => lens.command.title === '✗ failed')
 		.command.tooltip.startsWith('p1: Raven could not verify this proc'));
 	assert(lenses(statusDocument).find(lens => lens.command.title === '✓ verified')
-		.command.tooltip.startsWith('p0: Raven verified this proc before'));
+		.command.tooltip === 'p0: Raven verified this proc (cached).');
 	assert.strictEqual(lenses(statusDocument).at(-1).command.title, '– skipped');
 	assert.deepStrictEqual(titles(statusDocument, true), Array(5).fill('Verify this'));
 	const verifyP2 = lenses(statusDocument).find(lens => lens.command.arguments?.[1] === 'p2');
@@ -184,7 +184,7 @@ try {
 	assert.deepStrictEqual(statusTitles(), ['✓ verified', '✗ failed']);
 	report(2, 'scheduled', [{ status: 'verified', cached: true }, { status: 'pending' }]);
 	assert.deepStrictEqual(statusTitles(), ['✓ verified', '⋯ checking']);
-	assert(lenses(phasesDocument).find(lens => lens.command.title === '✓ verified').command.tooltip.includes('before'));
+	assert(lenses(phasesDocument).find(lens => lens.command.title === '✓ verified').command.tooltip.endsWith('(cached).'));
 	report(2, 'final', [{ status: 'verified', cached: true }, { status: 'verified' }]);
 	assert.deepStrictEqual(statusTitles(), ['✓ verified', '✓ verified']);
 	console.log('  ok   members keep their last status until a check says which it checks again, shown as checking');
