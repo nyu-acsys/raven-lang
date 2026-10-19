@@ -565,9 +565,9 @@ async function validateTextDocument(
 		...cacheArgs,
 		"--base-dir", dir, tmpfile.name
 	];
-	// Runs Raven with the [extra] arguments, reports the inherited contracts it finds to
-	// the client, and returns its diagnostics and whether it found errors.
-	const check = async (extra: string[]): Promise<CheckResult> => {
+	// Reports what Raven output, as [obtain] gives it, to the client, and returns its
+	// diagnostics and whether it found errors.
+	const interpret = async (obtain: () => Promise<string>): Promise<CheckResult> => {
 		let failed = false;
 		let unavailable: string | undefined;
 		let memberNames: string[] | undefined;
@@ -577,10 +577,7 @@ async function validateTextDocument(
 		const diagnostics: Diagnostic[] = [];
 
 		try {
-			// Protocol 4: a Raven server keeps the checked library between runs.
-			const stdout = protocol >= 4
-				? await verificationProcesses.serve(executable, argsWith(extra), dir, env, signal)
-				: await verificationProcesses.run(executable, argsWith(extra), { cwd: dir, env }, signal);
+			const stdout = await obtain();
 
 			connection.console.log(`Raven response: ${stdout}`);
 
@@ -834,8 +831,38 @@ async function validateTextDocument(
 		}
 		return { diagnostics, failed, unavailable, memberNames };
 	};
+	// Runs Raven with the [extra] arguments (protocols before 4).
+	const check = (extra: string[]): Promise<CheckResult> =>
+		interpret(() => verificationProcesses.run(executable, argsWith(extra), { cwd: dir, env }, signal));
 
 	try {
+		// Protocol 4: one run in a Raven server, which answers what type checking found
+		// first, as a run with --typeonly would.
+		if (protocol >= 4) {
+			for (;;) {
+				const focus = focusedNames.get(textDocument.uri);
+				let typedOutput: (text: string) => void = () => {};
+				const partial = new Promise<string>(resolve => { typedOutput = resolve; });
+				const verified = verificationProcesses.serve(executable, argsWith([
+					"--counterexamples", ...(focus ? ["--only", focus] : [])
+				]), dir, env, signal, typedOutput);
+				// Without a partial answer, the program does not type-check, and the final
+				// answer says so.
+				const typed = await interpret(() => Promise.race([partial, verified]));
+				// A focus whose name is gone is dropped, and the whole file verified.
+				if (typed.failed && focus && typed.memberNames && !typed.memberNames.includes(focus)) {
+					focusedNames.delete(textDocument.uri);
+					verified.catch(() => { /* superseded */ });
+					continue;
+				}
+				if (typed.failed) {
+					verified.catch(() => { /* reported by the type check */ });
+					return resultFor(typed);
+				}
+				if (!isCurrent()) throw new ResponseError(LSPErrorCodes.ServerCancelled, 'Verification superseded', { retriggerRequest: true });
+				return resultFor(await interpret(() => verified));
+			}
+		}
 		// Type checking alone gives the inherited contracts, much sooner than verification.
 		// Its errors are already the complete result; otherwise, verification follows.
 		if (protocol >= 3) {

@@ -25,20 +25,36 @@ if (process.argv[2] === '--server') {
 	let buffer = '';
 	let previous = Promise.resolve();
 	let current;
-	const answer = line => new Promise(done => {
-		const { id, cwd, args } = JSON.parse(line);
-		const run = require('child_process').spawn(process.execPath, [__filename, ...args], { cwd, detached: true });
-		current = { id, run, cancelled: false };
+	// One run, which does not log its arguments: the server logs the request's.
+	const run = (id, cwd, args) => new Promise(done => {
+		const child = require('child_process').spawn(process.execPath, [__filename, ...args],
+			{ cwd, detached: true, env: { ...process.env, RAVEN_FIXTURE_RUN: '1' } });
+		current = { id, run: child, cancelled: false };
 		let stdout = '', stderr = '';
-		run.stdout.on('data', data => { stdout += data; });
-		run.stderr.on('data', data => { stderr += data; });
-		run.on('close', code => {
-			const answer = current.cancelled ? { id, cancelled: true } : { id, exit: code ?? 1, stdout, stderr };
+		child.stdout.on('data', data => { stdout += data; });
+		child.stderr.on('data', data => { stderr += data; });
+		child.on('close', code => {
+			const cancelled = current.cancelled;
 			current = undefined;
-			process.stdout.write(JSON.stringify(answer) + '\\n');
-			done();
+			done({ cancelled, exit: code ?? 1, stdout, stderr });
 		});
 	});
+	const answer = line => (async () => {
+		const { id, cwd, args, partial } = JSON.parse(line);
+		fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + '\\n');
+		const send = answer => process.stdout.write(JSON.stringify({ id, ...answer }) + '\\n');
+		if (partial) {
+			// What type checking finds, as a run with --typeonly gives it, if it found no errors.
+			// Like Raven, an --only naming no member is an error before type checking.
+			const typed = await run(id, cwd, ['--typeonly', ...args.filter(arg => arg !== '--counterexamples')]);
+			if (typed.cancelled) { send({ cancelled: true }); return; }
+			let errors = true;
+			try { const output = JSON.parse(typed.stdout); errors = (Array.isArray(output) ? output : output.errors).length > 0; } catch { /* no output */ }
+			if (typed.exit === 0 && !errors) send({ partial: typed.stdout.trim() });
+		}
+		const verified = await run(id, cwd, args);
+		send(verified.cancelled ? { cancelled: true } : { exit: verified.exit, stdout: verified.stdout, stderr: verified.stderr });
+	})();
 	process.stdin.on('data', data => {
 		buffer += data;
 		let newline;
@@ -60,7 +76,7 @@ if (process.argv[2] === '--server') {
 	return;
 }
 const args = process.argv.slice(2);
-fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + '\\n');
+if (!process.env.RAVEN_FIXTURE_RUN) fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + '\\n');
 const file = args[args.length - 1];
 const text = fs.readFileSync(file, 'utf8');
 const location = { file, start_line: 2, start_col: 1, end_line: 2, end_col: 5 };
@@ -121,6 +137,9 @@ const symbols = text.includes('SYMBOLS') ? {
 	references: [{ line: 1, start_col: 0, end_col: 7, symbol: 0 }],
 	symbols: [{ name: 'M.SYMBOLS', kind: 'function', detail: 'func SYMBOLS()', definition: { ...location, start_line: 1, end_line: 1, end_col: 7 } }]
 } : {};
+// Like Raven, an --only naming no member is an error, reported with the members.
+const only = args.indexOf('--only');
+if (only >= 0 && !members.some(m => m.name === args[only + 1])) errors.push({ ...location, kind: 'Generic', message: ['There is no member ' + args[only + 1] + ' to verify'] });
 const emit = () => console.log(JSON.stringify(args.includes('--lsp-annotations') ? { errors, annotations: [], members, ...symbols, dependencies: [...dependencies] } : errors));
 if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 `, { mode: 0o755 });
@@ -399,8 +418,8 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 			settings.set(limitUri, { ...defaultSettings, maxNumberOfProblems });
 			send({ method: 'textDocument/didOpen', params: { textDocument: { uri: limitUri, languageId: 'raven', version: 1, text: 'program' } } });
 			assert.deepStrictEqual(await diagnostics(limitUri), []);
-			assert(calls().slice(-2).every(args =>
-				args[args.indexOf('--max-errors') + 1] === String(maxNumberOfProblems)));
+			// Protocol 4: one run, which answers the type check first.
+			assert.strictEqual(calls().at(-1)[calls().at(-1).indexOf('--max-errors') + 1], String(maxNumberOfProblems));
 			send({ method: 'textDocument/didClose', params: { textDocument: { uri: limitUri } } });
 		}
 		settings.set(limitUri, { ...defaultSettings, maxNumberOfProblems: 7 });
@@ -446,8 +465,8 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 		const focusStart = stateUpdates.length;
 		send({ method: 'raven/focus', params: { uri: focusUri, name: 'M.p' } });
 		assert.deepStrictEqual(await diagnostics(focusUri), []);
-		const [typeCheck, verification] = calls().slice(-2);
-		assert(typeCheck.includes('--typeonly') && !typeCheck.includes('--only'));
+		const verification = calls().at(-1);
+		assert(!verification.includes('--typeonly'));
 		assert.strictEqual(verification[verification.indexOf('--only') + 1], 'M.p');
 		assert(stateUpdates.slice(focusStart).filter(u => u.uri === focusUri).every(u => u.focus === 'M.p'));
 		send({ method: 'textDocument/didChange', params: { textDocument: { uri: focusUri, version: 2 }, contentChanges: [{ text: 'FOCUS edited' }] } });
@@ -475,7 +494,7 @@ if (text.includes('SLOW')) setTimeout(emit, 150); else emit();
 		const cexDiagnostics = await diagnostics(cexUri);
 		assert(inlayHintRefreshes > refreshesBefore, 'Inlay hints are refreshed after a check');
 		assert.deepStrictEqual(cexDiagnostics.map(d => d.message), ['[Verification Error] Assertion failed']);
-		assert(calls().at(-1).includes('--counterexamples') && !calls().at(-2).includes('--counterexamples'));
+		assert(calls().at(-1).includes('--counterexamples') && !calls().at(-1).includes('--typeonly'));
 		const hints = await request('textDocument/inlayHint', { textDocument: { uri: cexUri }, range: { start: { line: 0, character: 0 }, end: { line: 2, character: 0 } } });
 		assert.deepStrictEqual(hints.map(h => [h.position, h.label]),
 			[[{ line: 1, character: 5 }, 'CEX = 1'], [{ line: 0, character: 4 }, '→ then (failure on line 2)']]);
