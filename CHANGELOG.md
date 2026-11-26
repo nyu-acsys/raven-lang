@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `within` and `depends` clauses are highlighted as keywords.
+
 ### Fixed
 
 - `checked` is highlighted as a keyword.
